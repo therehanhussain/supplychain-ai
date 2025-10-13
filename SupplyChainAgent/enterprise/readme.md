@@ -31,3 +31,5 @@ pip install python-dotenv
 
 ## agent运行
 PYTHONPATH=/home/cuda/agentsociety-enterprise venv/bin/python SupplyChainAgent/enterprise/main.py
+
+为确保运行，还需补充config中的map信息（实际未使用），从可[AgentSociety官网](https://agentsociety.fiblab.net/ "AgentSociety官网")内的地图页面下载获取map文件
