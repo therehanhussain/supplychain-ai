@@ -21,9 +21,6 @@ async def main():
     await agentsociety.run()
     await agentsociety.close()
     ray.shutdown()
-    # 1.问价 添加 base_price 基底
-    # 2.相关订单加topic
-    # 3.先让大模型接收超额订单，可以变负数，后续增加产能调整模块，可以不立马交付货物
 
 
 if __name__ == "__main__":
