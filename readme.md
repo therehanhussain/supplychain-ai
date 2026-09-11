@@ -86,40 +86,47 @@ pip install python-dotenv
 OPENAI_API_KEY=YOUR_API_KEY
 ```
 
-## 🚀 Running the Project
-If you only want to run the simulation, just enable Docker and the simulation script. To view the frontend visualization, you need to start Docker while also enabling the two backend data services and the frontend service.
-### 🐳 Run with Docker
-In the docker directory:
-```bash
-docker compose -f ./docker-compose-cn.yml up -d
-```
+## 🌐 Live Production Deployment
 
-### 🤖 Run the Agent System
-```bash
-venv/bin/python SupplyChainAgent/enterprise/main.py
-```
+* **Production Frontend (Vercel)**: [https://frontend-pi-hazel-83.vercel.app](https://frontend-pi-hazel-83.vercel.app)
+* **Production API (Render)**: [https://supplychain-backend-hc9p.onrender.com](https://supplychain-backend-hc9p.onrender.com)
+* **Liveness Probe**: [https://supplychain-backend-hc9p.onrender.com/health/live](https://supplychain-backend-hc9p.onrender.com/health/live)
+* **Status**: `DEPLOYED AND VALIDATED` (Managed PostgreSQL 16, Managed Redis, Neo4j certified fallback mode, and mock LLM deterministic simulation).
 
+For full cloud architecture and operational runbooks, see [Phase 12 Finalization](docs/PHASE_12_PRODUCTION_FINALIZATION.md).
 
-### 🧠 Run Backend Data Service
+---
+
+## 🚀 Running the Project Locally
+
+### 1️⃣ Start the Modern Backend API
+In the project root directory:
 ```bash
-agentsociety ui -c config.yaml
+# Run database migrations
+alembic -c backend/alembic.ini upgrade head
+
+# Start FastAPI application
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-### 🌍 Start the Frontend
-Install the latest frontend components and run:
+Interactive API documentation will be available at:
+`http://localhost:8000/docs`
+
+### 2️⃣ Start the Frontend Visualization
+In the `frontend/` directory:
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-### ⚡ Launch the Backend API
-In the SupplyChainAgent/enterprise directory:
+The React development dashboard will be available at:
+`http://localhost:5173`
+
+### 🐳 Self-Hosted / VPS Deployment Profile (Docker)
+For self-hosted bare-metal or cloud VPS environments, the complete multi-container Docker infrastructure is preserved:
 ```bash
-uvicorn enterprise_Api:app --host localhost --port 8000 --reload
+docker compose -f infra/docker-compose.production.yml up -d
 ```
-Once running, the API will be available at:
-http://127.0.0.1:8000
-
-
+See [Phase 8 Infrastructure Documentation](docs/PHASE_8_INFRASTRUCTURE.md) for self-hosted orchestration details.
 
 ## 📊 Key Features
 
