@@ -1,0 +1,208 @@
+# ==============================================================================
+# SupplyChainAgent Production Docker Compose Architecture
+# All internal services communicate exclusively over private network.
+# Only Caddy ingress proxy exposes ports 80 & 443 to the public internet.
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Caddy Reverse Proxy & Automatic TLS Termination
+  # ----------------------------------------------------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: supplychain_caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3 QUIC support
+    environment:
+      - DOMAIN=${DOMAIN:-example.com}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - supplychain_production_net
+
+  # ----------------------------------------------------------------------------
+  # 2. FastAPI ASGI Backend Service
+  # ----------------------------------------------------------------------------
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/docker/backend.Dockerfile
+    container_name: supplychain_backend
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      - ENVIRONMENT=production
+      - PORT=8000
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-supplychain}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-supplychain}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      - CORS_ORIGINS=${CORS_ORIGINS:-https://frontend-pi-hazel-83.vercel.app}
+      - LLM_MODE=${LLM_MODE:-mock}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      - DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL:-gpt-4o-mini}
+      - CELERY_WORKER_CONCURRENCY=${CELERY_WORKER_CONCURRENCY:-2}
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - supplychain_production_net
+
+  # ----------------------------------------------------------------------------
+  # 3. Celery Asynchronous Background Worker
+  # ----------------------------------------------------------------------------
+  celery_worker:
+    build:
+      context: ..
+      dockerfile: infra/docker/backend.Dockerfile
+    container_name: supplychain_celery
+    restart: unless-stopped
+    command: ["celery", "-A", "backend.app.workers.celery_app.celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-supplychain}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-supplychain}
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE:-neo4j}
+      - LLM_MODE=${LLM_MODE:-mock}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEFAULT_LLM_MODEL=${DEFAULT_LLM_MODEL:-gpt-4o-mini}
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - supplychain_production_net
+
+  # ----------------------------------------------------------------------------
+  # 4. PostgreSQL 16 Relational Persistence
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: supplychain_postgres
+    restart: unless-stopped
+    expose:
+      - "5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-supplychain}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-supplychain}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_production_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-supplychain} -d $${POSTGRES_DB:-supplychain}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - supplychain_production_net
+
+  # ----------------------------------------------------------------------------
+  # 5. Neo4j 5 Community Graph Database
+  # ----------------------------------------------------------------------------
+  neo4j:
+    image: neo4j:5-community
+    container_name: supplychain_neo4j
+    restart: unless-stopped
+    expose:
+      - "7474"
+      - "7687"
+    environment:
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_heap_initial__size: 512m
+      NEO4J_dbms_memory_heap_max__size: 1536m
+      NEO4J_dbms_memory_pagecache_size: 512m
+    volumes:
+      - neo4j_production_data:/data
+      - neo4j_production_logs:/logs
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    networks:
+      - supplychain_production_net
+
+  # ----------------------------------------------------------------------------
+  # 6. Redis 7 Cache & Broker
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: supplychain_redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    restart: unless-stopped
+    expose:
+      - "6379"
+    volumes:
+      - redis_production_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - supplychain_production_net
+
+# ==============================================================================
+# Persistent Named Volumes
+# ==============================================================================
+volumes:
+  postgres_production_data:
+    name: supplychain_postgres_production_data
+  neo4j_production_data:
+    name: supplychain_neo4j_production_data
+  neo4j_production_logs:
+    name: supplychain_neo4j_production_logs
+  redis_production_data:
+    name: supplychain_redis_production_data
+  caddy_data:
+    name: supplychain_caddy_data
+  caddy_config:
+    name: supplychain_caddy_config
+
+# ==============================================================================
+# Isolated Private Production Network
+# ==============================================================================
+networks:
+  supplychain_production_net:
+    name: supplychain_production_net
+    driver: bridge

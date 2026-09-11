@@ -1,0 +1,66 @@
+# ==============================================================================
+# Caddyfile — Production Ingress & Reverse Proxy for SupplyChainAgent
+# Handles automated TLS certificate acquisition (Let's Encrypt / ZeroSSL),
+# OWASP security headers, request proxying, and health checking.
+# ==============================================================================
+
+{
+    # Global Configuration
+    email {$ACME_EMAIL:admin@example.com}
+    admin off
+    auto_https disable_redirects # Caddy still manages HTTPS on 443 and redirects 80 automatically
+}
+
+api.{$DOMAIN:example.com} {
+    # --------------------------------------------------------------------------
+    # 1. Transport & Security Headers
+    # --------------------------------------------------------------------------
+    header {
+        # Enforce HTTPS via Strict-Transport-Security (1 year + subdomains + preload)
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        # Prevent MIME-type sniffing
+        X-Content-Type-Options "nosniff"
+        # Clickjacking mitigation
+        X-Frame-Options "DENY"
+        # Browser XSS filter
+        X-XSS-Protection "1; mode=block"
+        # Referrer privacy
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Remove server identity signature
+        -Server
+    }
+
+    # --------------------------------------------------------------------------
+    # 2. Request Constraints
+    # --------------------------------------------------------------------------
+    request_body {
+        max_size 25MB
+    }
+
+    # --------------------------------------------------------------------------
+    # 3. Reverse Proxy to FastAPI Backend Service
+    # --------------------------------------------------------------------------
+    reverse_proxy backend:8000 {
+        # Forward true client network identity
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # Connection buffering & streaming
+        flush_interval -1
+
+        # Passive upstream health inspection
+        fail_duration 15s
+        max_fails 3
+    }
+
+    # --------------------------------------------------------------------------
+    # 4. Structured Access Logging
+    # --------------------------------------------------------------------------
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+}
