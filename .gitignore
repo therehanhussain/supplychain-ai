@@ -8,10 +8,9 @@ wheelhouse/
 build/
 .venv/
 .python-version
-log/
-test*
-cache/
-ignore/
+.pytest_cache/
+!tests/
+!tests/**
 *.ipynb*
 *.ipynb*/
 *pycache*

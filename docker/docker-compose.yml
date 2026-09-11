@@ -5,7 +5,7 @@ services:
       context: ./mlflow
       dockerfile: Dockerfile
       args:
-        BASE_IMAGE: bitnami/mlflow:2.19.0
+        BASE_IMAGE: bitnamilegacy/mlflow:2.19.0
     container_name: mlflow
     restart: always
     ports:
@@ -14,12 +14,12 @@ services:
       - mlflow:/app
     environment:
       MLFLOW_AUTH_CONFIG_PATH: /mlflow/basic_auth.ini
-      PG_DSN: postgresql://postgres:CHANGE_ME@postgresql-svc:5432/postgres
+      POSTGRESQL_PASSWORD: SupplyChainDB2026
     depends_on:
       - postgresql-svc
 
   postgresql-svc:
-    image: bitnami/postgresql:17
+    image: bitnami/postgresql:latest
     container_name: postgresql
     restart: unless-stopped
     ports:
@@ -30,16 +30,16 @@ services:
       POSTGRESQL_PASSWORD: CHANGE_ME
 
   redis-svc:
-    image: bitnami/redis:7.2
+    image: bitnami/redis:latest
     container_name: redis 
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "CHANGE_ME", "ping"]
+      test: ["CMD", "redis-cli", "-a", "SupplyChainRedis2026", "ping"]
       interval: 5s
       timeout: 30s
       retries: 3
     restart: always
     environment:
-      REDIS_PASSWORD: CHANGE_ME
+      REDIS_PASSWORD: SupplyChainRedis2026
       REDIS_AOF_ENABLED: no
     ports:
       - 6379:6379 # TCP Listener for Redis

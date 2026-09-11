@@ -1,4 +1,4 @@
-const BackendApiUrl = "http://localhost:8000/api";
+const BackendApiUrl = (import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace(/\/+$/, '') : "http://localhost:8000") + "/api";
 
 export class ApiError extends Error {
     message: string;

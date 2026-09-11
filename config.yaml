@@ -28,14 +28,14 @@ env:
     enabled: true # Whether to enable MLflow
     mlflow_uri: http://localhost:59000 # MLflow server URI
     username: admin # MLflow server username
-    password: CHANGE_ME # MLflow server password
+    password: SupplyChainML2026 # MLflow server password
   pgsql:
     enabled: true # Whether to enable PostgreSQL
-    dsn: postgresql://postgres:CHANGE_ME@localhost:5432/postgres # PostgreSQL connection string
+    dsn: postgresql://postgres:SupplyChainDB2026@localhost:5432/postgres # PostgreSQL connection string
   redis:
     server: localhost # Redis server address
     port: 6379 # Redis port
-    password: CHANGE_ME # Redis password
+    password: SupplyChainRedis2026 # Redis password
 map:
   # file_path: "./data/beijing_map.pb" # Path to the map file
   # cache_path: ./data/beijing_map.pb # Cache path for accelerating map file loading
