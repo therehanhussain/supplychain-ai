@@ -1,6 +1,6 @@
 """Inventory API Endpoints (/api/v1/inventory) backed by PostgreSQL persistence."""
 from typing import List, Optional
-from fastapi import APIRouter, Depends, status, Query
+from fastapi import APIRouter, Depends, status, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.database import get_db
 from backend.app.api.dependencies import get_tenant_context, TenantContext
@@ -12,21 +12,32 @@ router = APIRouter(prefix="/inventory", tags=["Inventory"])
 
 @router.get("", response_model=List[InventoryItemResponse], summary="List inventory items")
 async def list_inventory(
+    response: Response,
     warehouse_id: Optional[str] = Query(None),
     low_stock_only: bool = Query(False),
+    page: Optional[int] = Query(None, ge=1, description="Page number (1-indexed)"),
+    page_size: Optional[int] = Query(None, ge=1, le=500, description="Page size limit"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     tenant: TenantContext = Depends(get_tenant_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Retrieve catalog of inventory items and stock levels for current tenant."""
+    effective_limit = page_size if page_size is not None else limit
+    effective_skip = ((page - 1) * effective_limit) if page is not None else skip
+
     service = InventoryService(db, tenant.organization_id)
-    return await service.list_inventory(
+    items = await service.list_inventory(
         warehouse_id=warehouse_id,
         low_stock_only=low_stock_only,
-        skip=skip,
-        limit=limit,
+        skip=effective_skip,
+        limit=effective_limit,
     )
+
+    response.headers["X-Total-Count"] = str(len(items))
+    response.headers["X-Page"] = str(page or ((skip // effective_limit) + 1))
+    response.headers["X-Page-Size"] = str(effective_limit)
+    return items
 
 
 @router.get("/{item_id}", response_model=InventoryItemResponse, summary="Get inventory item")

@@ -1,0 +1,88 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  backend-test:
+    name: Backend Lint, Test & Verification
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Syntax & Bytecode Compilation Check
+        run: |
+          python -m compileall backend
+
+      - name: Run Pytest Test Suite
+        env:
+          ENVIRONMENT: test
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+          JWT_SECRET: ci_pipeline_test_secret_key_32_chars_minimum
+          LLM_MODE: mock
+          RATE_LIMIT_ENABLED: "false"
+        run: |
+          pytest tests/ -v --durations=10
+
+      - name: Run Persistence & Schema Verification
+        env:
+          DATABASE_URL: sqlite+aiosqlite:///:memory:
+        run: |
+          python backend/scripts/verify_postgres.py
+
+  frontend-build:
+    name: Frontend Typecheck & Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run Production Bundle Build (tsc -b && vite build)
+        working-directory: frontend
+        env:
+          VITE_API_URL: http://localhost:8000
+        run: npm run build
+
+  security-scan:
+    name: Secrets & Dependency Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Check for Uncommitted .env Files
+        run: |
+          if git ls-files | grep -E "(^|/)\.env$"; then
+            echo "Error: .env file found tracked in git repository!"
+            exit 1
+          fi
+          echo "No .env files tracked in repository."

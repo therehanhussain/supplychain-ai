@@ -107,14 +107,35 @@ class ApiClient {
           }
         }
 
+        // Extract and sanitize human-readable error messages
+        let rawMessage = error.response?.data?.message || error.response?.data?.detail;
+        if (Array.isArray(rawMessage)) {
+          // FastAPI pydantic validation error array
+          rawMessage = rawMessage.map((e: any) => e.msg || 'Invalid field').join(', ');
+        } else if (typeof rawMessage !== 'string') {
+          if (error.response?.status === 401) {
+            rawMessage = 'Session expired or authentication invalid. Please re-authenticate.';
+          } else if (error.response?.status === 403) {
+            rawMessage = 'Access denied. You do not have permissions for this action.';
+          } else if (error.response?.status === 404) {
+            rawMessage = 'The requested resource was not found.';
+          } else if (error.response?.status === 500) {
+            rawMessage = 'Internal service error. Fallback operational data active.';
+          } else {
+            rawMessage = error.message || 'Service communication error. Certified fallback active.';
+          }
+        } else if (rawMessage.includes('Traceback') || rawMessage.includes('File "') || rawMessage.includes('line ')) {
+          rawMessage = 'An unexpected server operation occurred. Certified fallback data active.';
+        }
+
         const errorResponse: ApiErrorDetail = {
           status: error.response?.status || 500,
-          code: error.response?.data?.code || error.response?.data?.error_code || 'NETWORK_ERROR',
-          message: error.response?.data?.message || error.message || 'An unexpected network error occurred',
+          code: error.response?.data?.code || error.response?.data?.error_code || (error.response ? `HTTP_${error.response.status}` : 'NETWORK_ERROR'),
+          message: rawMessage,
           requestId: error.response?.headers?.['x-request-id'] || error.response?.data?.request_id,
           details: error.response?.data?.details,
         };
-        console.error(`[API Error] [${errorResponse.code}]:`, errorResponse.message);
+        console.warn(`[API ${errorResponse.status}] [${errorResponse.code}]:`, errorResponse.message);
         return Promise.reject(errorResponse);
       }
     );

@@ -80,6 +80,12 @@ class Settings(BaseSettings):
     # MLflow Tracking Server (Optional)
     MLFLOW_TRACKING_URI: str = Field(default="http://localhost:59000")
 
+    # Rate Limiting Configuration
+    RATE_LIMIT_ENABLED: bool = Field(default=True)
+    RATE_LIMIT_UNAUTHENTICATED: int = Field(default=30, description="Max requests per minute for unauthenticated clients")
+    RATE_LIMIT_AUTHENTICATED: int = Field(default=120, description="Max requests per minute for authenticated clients")
+    RATE_LIMIT_SIMULATION: int = Field(default=10, description="Max requests per minute for simulation/AI dispatch")
+
 
 # Global cached settings instance
 settings = Settings()

@@ -30,3 +30,6 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+capture_screenshots.py
+localize_graph.py
+screenshots/

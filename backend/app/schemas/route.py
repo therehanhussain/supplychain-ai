@@ -14,6 +14,8 @@ class SupplyRelationship(BaseModel):
 
 
 class RouteTopologyResponse(BaseModel):
-    source: str = Field(..., description="'neo4j' or 'fallback_file'")
+    source: str = Field(..., description="'neo4j_cluster' or 'offline_fallback_dataset'")
+    data_mode: str = Field(default="DEGRADED", description="'LIVE', 'DEGRADED', or 'UNAVAILABLE'")
+    status_message: Optional[str] = Field(default=None, description="Human-readable provenance and status note")
     relationships: List[Dict[str, Any]] = Field(default_factory=list)
     tier_statistics: List[Dict[str, Any]] = Field(default_factory=list)

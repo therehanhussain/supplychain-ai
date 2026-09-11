@@ -74,3 +74,105 @@ def test_cross_tenant_data_isolation(client: TestClient):
     verify_a = client.get(f"/api/v1/suppliers/{alpha_supplier_id}", headers=headers_a)
     assert verify_a.status_code == 200
     assert verify_a.json()["name"] == "Alpha Secret High-Yield Foundry"
+
+
+def test_cross_tenant_inventory_and_orders_isolation(client: TestClient):
+    """Verify Tenant B cannot read or delete Tenant A's inventory, orders, or shipments."""
+    # 1. Register Tenant A
+    res_a = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "corp_a_lead@tenanta.com",
+            "password": "PasswordTenA2026!",
+            "full_name": "Tenant A Admin",
+            "organization_name": "Tenant A Logistics",
+        },
+    )
+    assert res_a.status_code == 201
+    headers_a = {"Authorization": f"Bearer {res_a.json()['access_token']}"}
+
+    # 2. Register Tenant B
+    res_b = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "corp_b_lead@tenantb.com",
+            "password": "PasswordTenB2026!",
+            "full_name": "Tenant B Admin",
+            "organization_name": "Tenant B Logistics",
+        },
+    )
+    assert res_b.status_code == 201
+    headers_b = {"Authorization": f"Bearer {res_b.json()['access_token']}"}
+
+    # 3. Tenant A creates inventory item
+    inv_res = client.post(
+        "/api/v1/inventory",
+        headers=headers_a,
+        json={
+            "sku": "MAT-ALPHA-WAFER-01",
+            "name": "Alpha Silicon Wafer Grade 9",
+            "warehouse_id": "wh-alpha-001",
+            "quantity_on_hand": 5000.0,
+            "quantity_reserved": 200.0,
+            "reorder_point": 1000.0,
+            "unit_cost": 45.0,
+        },
+    )
+    assert inv_res.status_code == 201
+    alpha_inv_id = inv_res.json()["id"]
+
+    # 4. Tenant B cannot see Tenant A's inventory item
+    list_inv_b = client.get("/api/v1/inventory", headers=headers_b)
+    assert list_inv_b.status_code == 200
+    assert all(item["id"] != alpha_inv_id for item in list_inv_b.json())
+
+    # 5. Tenant B cannot get or delete Tenant A's inventory item
+    assert client.get(f"/api/v1/inventory/{alpha_inv_id}", headers=headers_b).status_code == 404
+    assert client.delete(f"/api/v1/inventory/{alpha_inv_id}", headers=headers_b).status_code == 404
+
+    # 6. Tenant A creates an order
+    order_res = client.post(
+        "/api/v1/orders",
+        headers=headers_a,
+        json={
+            "customer_name": "Alpha Defense Logistics",
+            "supplier_id": "supp-dummy-alpha",
+            "status": "pending",
+            "total_amount": 75000.0,
+            "items": [
+                {
+                    "product_id": "prod-001",
+                    "product_name": "Silicon Ingot",
+                    "quantity": 100.0,
+                    "unit_price": 750.0,
+                }
+            ],
+        },
+    )
+    assert order_res.status_code == 201
+    alpha_order_id = order_res.json()["id"]
+
+    # 7. Tenant B cannot get or delete Tenant A's order
+    assert client.get(f"/api/v1/orders/{alpha_order_id}", headers=headers_b).status_code == 404
+    assert client.delete(f"/api/v1/orders/{alpha_order_id}", headers=headers_b).status_code == 404
+
+    # 8. Tenant A creates a shipment
+    ship_res = client.post(
+        "/api/v1/shipments",
+        headers=headers_a,
+        json={
+            "order_id": alpha_order_id,
+            "carrier": "DHL Global Forwarding",
+            "tracking_number": "TRK-ALPHA-001",
+            "origin": "Hamburg Port",
+            "destination": "Munich Distribution Hub",
+            "status": "in_transit",
+        },
+    )
+    assert ship_res.status_code == 201
+    alpha_shipment_id = ship_res.json()["id"]
+
+    # 9. Tenant B cannot get or delete Tenant A's shipment
+    assert client.get(f"/api/v1/shipments/{alpha_shipment_id}", headers=headers_b).status_code == 404
+    assert client.delete(f"/api/v1/shipments/{alpha_shipment_id}", headers=headers_b).status_code == 404
+

@@ -94,7 +94,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
   const renderApiDataModal = () => {
     return (
       <Modal
-        title="数据库数据"
+        title="Network Topology Records"
         open={showApiModal}
         onCancel={() => setShowApiModal(false)}
         footer={[
@@ -119,9 +119,9 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
                     renderItem={(company: any) => (
                       <List.Item>
                         <Descriptions size="small" column={2}>
-                          <Descriptions.Item label="公司名称">{company.company_name}</Descriptions.Item>
-                          <Descriptions.Item label="公司ID">{company.company_id}</Descriptions.Item>
-                          <Descriptions.Item label="层级">
+                          <Descriptions.Item label="Company Name">{company.company_name}</Descriptions.Item>
+                          <Descriptions.Item label="Company ID">{company.company_id}</Descriptions.Item>
+                          <Descriptions.Item label="Echelon Tier">
                             {(() => {
                               const levelInfo = companyLevels.get(company.company_id || company.id);
                               if (levelInfo) {
@@ -142,7 +142,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
                               );
                             })()}
                           </Descriptions.Item>
-                          <Descriptions.Item label="状态">{company.status || '正常'}</Descriptions.Item>
+                          <Descriptions.Item label="Status">{company.status || 'Active'}</Descriptions.Item>
                         </Descriptions>
                       </List.Item>
                     )}
@@ -162,12 +162,12 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
                     renderItem={(transaction: any) => (
                       <List.Item>
                         <Descriptions size="small" column={2}>
-                          <Descriptions.Item label="交易ID">{transaction.id}</Descriptions.Item>
-                          <Descriptions.Item label="步数">{transaction.step}</Descriptions.Item>
-                          <Descriptions.Item label="买方">{transaction.buyer}</Descriptions.Item>
-                          <Descriptions.Item label="卖方">{transaction.seller}</Descriptions.Item>
-                          <Descriptions.Item label="产品">{transaction.product}</Descriptions.Item>
-                          <Descriptions.Item label="数量">{transaction.quantity}</Descriptions.Item>
+                          <Descriptions.Item label="Transaction ID">{transaction.id}</Descriptions.Item>
+                          <Descriptions.Item label="Simulation Step">{transaction.step}</Descriptions.Item>
+                          <Descriptions.Item label="Buyer">{transaction.buyer}</Descriptions.Item>
+                          <Descriptions.Item label="Seller">{transaction.seller}</Descriptions.Item>
+                          <Descriptions.Item label="Product SKU">{transaction.product}</Descriptions.Item>
+                          <Descriptions.Item label="Quantity">{transaction.quantity}</Descriptions.Item>
                         </Descriptions>
                       </List.Item>
                     )}
@@ -191,12 +191,12 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
                     renderItem={(communication: any) => (
                       <List.Item>
                         <Descriptions size="small" column={2}>
-                          <Descriptions.Item label="通信ID">{communication.id}</Descriptions.Item>
-                          <Descriptions.Item label="步数">{communication.step}</Descriptions.Item>
-                          <Descriptions.Item label="发送方">{communication.sender}</Descriptions.Item>
-                          <Descriptions.Item label="接收方">{communication.receiver}</Descriptions.Item>
-                          <Descriptions.Item label="消息类型">{communication.message_type}</Descriptions.Item>
-                          <Descriptions.Item label="内容">
+                          <Descriptions.Item label="Message ID">{communication.id}</Descriptions.Item>
+                          <Descriptions.Item label="Simulation Step">{communication.step}</Descriptions.Item>
+                          <Descriptions.Item label="Sender">{communication.sender}</Descriptions.Item>
+                          <Descriptions.Item label="Receiver">{communication.receiver}</Descriptions.Item>
+                          <Descriptions.Item label="Message Type">{communication.message_type}</Descriptions.Item>
+                          <Descriptions.Item label="Message Payload">
                             <div style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {communication.content}
                             </div>
@@ -224,36 +224,36 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
                     renderItem={(edge: any) => (
                       <List.Item>
                         <Descriptions size="small" column={2}>
-                          <Descriptions.Item label="连线ID">{edge.id}</Descriptions.Item>
-                          <Descriptions.Item label="类型">
+                          <Descriptions.Item label="Edge ID">{edge.id}</Descriptions.Item>
+                          <Descriptions.Item label="Relationship Type">
                             <Tag color={edge.type === 'transaction' ? 'blue' : edge.type === 'communication' ? 'green' : edge.type === 'material_supply' ? 'orange' : 'default'}>
                   {edge.type === 'transaction' ? '交易' : edge.type === 'communication' ? '通信' : edge.type === 'material_supply' ? '材料供应' : edge.type}
                 </Tag>
                           </Descriptions.Item>
-                          <Descriptions.Item label="起点ID">{edge.source}</Descriptions.Item>
-                          <Descriptions.Item label="终点ID">{edge.target}</Descriptions.Item>
+                          <Descriptions.Item label="Source ID">{edge.source}</Descriptions.Item>
+                          <Descriptions.Item label="Target ID">{edge.target}</Descriptions.Item>
                           {edge.transaction_data && (
-                            <Descriptions.Item label="交易信息">
+                            <Descriptions.Item label="Transaction Info">
                               {edge.transaction_data.product || '未知产品'} - {edge.transaction_data.quantity || '未知数量'}
                             </Descriptions.Item>
                           )}
                           {edge.communication_data && (
-                            <Descriptions.Item label="消息内容">
+                            <Descriptions.Item label="Message Content">
                               {edge.communication_data.message_type || '未知类型'}
                             </Descriptions.Item>
                           )}
                           {edge.material_data && (
                             <>
-                              <Descriptions.Item label="材料名称">
+                              <Descriptions.Item label="Material SKU">
                                 {edge.material_data.material_name || '未知材料'}
                               </Descriptions.Item>
-                              <Descriptions.Item label="供应商">
+                              <Descriptions.Item label="Supplier">
                                 {edge.material_data.supplier_company || '未知供应商'}
                               </Descriptions.Item>
-                              <Descriptions.Item label="消费者">
+                              <Descriptions.Item label="Consumer">
                                 {edge.material_data.consumer_company || '未知消费者'}
                               </Descriptions.Item>
-                              <Descriptions.Item label="产品序号">
+                              <Descriptions.Item label="Product Index">
                                 {edge.material_data.product_index || '未知'}
                               </Descriptions.Item>
                             </>
@@ -670,7 +670,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
   // 获取节点详情的函数，现在只负责触发nodeSelected事件
   const fetchNodeDetail = async (nodeId: string) => {
     if (!nodeId) {
-      message.info('请先选择一个节点');
+      message.info('Please select a node first');
       return;
     }
 
@@ -724,7 +724,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
           window.dispatchEvent(event);
         }
       } else {
-        message.info('未找到该节点的详细信息');
+        message.info('No details available for selected node');
       }
     } catch (error) {
       console.error('Error fetching node details:', error);
@@ -831,11 +831,11 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
         materialSupplyAgents: Object.keys(materialSupplyData).length
       });
 
-      message.success('API数据加载成功');
+      // API data loaded
       return combinedApiData; // 返回加载的数据
     } catch (error) {
       console.error('IndustryGraph: API数据加载失败:', error);
-      message.error('API数据加载失败，将使用本地数据');
+      // Falling back to local data
       return null; // 加载失败返回null
     } finally {
       setApiLoading(false);
@@ -856,7 +856,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
         if (loadedApiData && loadedApiData.companies && loadedApiData.companies.length > 0) {
           const apiGraphData = await processApiData(loadedApiData);
           setData(apiGraphData);
-          message.success('使用API数据构建图谱成功');
+          // Graph built successfully
           setLoading(false);
           return;
         }
@@ -908,7 +908,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
           const processedData = await processIndustryData(stateData);
           (processedData as Record<string, any>).stateData = stateData;
           setData(processedData);
-          message.success(`成功从 ${loadedFrom} 加载本地数据`);
+          // Data loaded from local fixture
           setLoading(false);
           return;
         }
@@ -942,7 +942,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
           // 处理数据
           const processedData = await processIndustryData(industryData);
           setData(processedData);
-          message.success(`成功从 ${loadedFrom} 加载产业数据`);
+          // Data loaded from local fixture
           setLoading(false);
           return;
         }
@@ -1972,14 +1972,14 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
     // 处理数据
     if (!filteredData || typeof filteredData !== 'object' || filteredData instanceof Promise) {
       console.error('数据格式不正确 - 数据为空、非对象或Promise:', filteredData);
-      message.error('数据格式不正确，无法渲染图谱');
+      message.error('Invalid topology data format');
       setLoading(false);
       return;
     }
 
     if (!filteredData.nodes || !filteredData.edges) {
       console.error('数据格式不正确 - 缺少nodes或edges:', filteredData);
-      message.error('数据格式不正确，无法渲染图谱');
+      message.error('Invalid topology data format');
       setLoading(false);
       return;
     }
@@ -2487,7 +2487,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
 
   return (
     <Card
-      title={<Title level={5} style={{ margin: 0, fontSize: '16px' }}>产业链图谱</Title>}
+      title={<Title level={5} style={{ margin: 0, fontSize: '15px', fontWeight: 700 }}>Supply Network Topology Graph</Title>}
       style={{
         width: '100%',
         height: '100%',
@@ -2507,7 +2507,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
       bodyStyle={{ padding: '8px', flex: 1, display: 'flex', flexDirection: 'column' }}
       extra={
         <Space size="small">
-          <Tooltip title="连线显示模式">
+          <Tooltip title="Relationship Display Filter">
             <Space.Compact>
               <Button
                 size="small"
@@ -2539,7 +2539,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
               </Button>
             </Space.Compact>
           </Tooltip>
-          <Tooltip title="布局模式">
+          <Tooltip title="Layout Engine">
             <Space.Compact>
               <Button
                 size="small"
@@ -2571,7 +2571,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
               </Button>
             </Space.Compact>
           </Tooltip>
-          <Tooltip title="查看数据库数据">
+          <Tooltip title="View Entity Records">
             <Button
               size="small"
               icon={<DatabaseOutlined />}
@@ -2580,9 +2580,9 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
               type={apiData ? "primary" : "default"}
             />
           </Tooltip>
-          <Tooltip title="行为高亮：根据当前步数和选中节点高亮相关节点标签">
+          <Tooltip title="Highlight Active Node Paths">
             <Space size="small">
-              <span style={{ fontSize: '12px', color: '#666' }}>行为高亮</span>
+              <span style={{ fontSize: '12px', color: '#666' }}>Highlight Paths</span>
               <Switch
                 size="small"
                 checked={behaviorHighlightEnabled}
@@ -2599,28 +2599,28 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }
               />
             </Space>
           </Tooltip>
-          <Tooltip title="重新加载">
+          <Tooltip title="Reload Graph">
             <Button size="small" icon={<ReloadOutlined />} onClick={handleReload} />
           </Tooltip>
           {/* 删除查看详情按钮，详情将显示在左侧边栏 */}
-          <Tooltip title="放大">
+          <Tooltip title="Zoom In">
             <Button size="small" icon={<ZoomInOutlined />} onClick={zoomIn} />
           </Tooltip>
-          <Tooltip title="缩小">
+          <Tooltip title="Zoom Out">
             <Button size="small" icon={<ZoomOutOutlined />} onClick={zoomOut} />
           </Tooltip>
-          <Tooltip title={fullscreen ? "退出全屏" : "全屏"}>
+          <Tooltip title={fullscreen ? "Exit Fullscreen" : "Fullscreen"}>
             <Button size="small" icon={<FullscreenOutlined />} onClick={toggleFullscreen} />
           </Tooltip>
         </Space>
       }
     >
-      <Spin spinning={loading} tip="加载图谱中..." style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+      <Spin spinning={loading} tip="Rendering Network Topology..." style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
         <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column' }}>
           {!loading && (
             <div style={{ padding: '4px 8px', background: 'rgba(0,0,0,0.03)', borderRadius: '4px', marginBottom: '4px' }}>
               <Typography.Text type="secondary" style={{ fontSize: '12px' }}>
-                提示：点击节点可查看相关连线，指向该节点的连线显示为红色，由该节点出发的连线显示为蓝色。使用上方按钮切换连线显示模式：全部、供给关系、交易关系、通信关系。节点详细信息会显示在左侧边栏中。开启"行为高亮"功能后，会根据当前时间轴步数和选中节点的行为历史，将相关节点的标签高亮为紫色背景。布局模式：层级布局按产业层级排列（蓝色为一级、绿色为二级、橙色为三级），力导向布局通过物理模拟自动调整节点位置避免重叠，分层布局采用有向无环图算法减少连线交叉，网格布局将节点均匀分布在网格中。
+                Interactive Guide: Click nodes to inspect upstream dependencies and downstream fulfillment flows. Blue links denote outbound material supplies; red links denote inbound orders. Use the toolbar above to switch layouts (Hierarchical, Force, Dagre, Grid) and filter relationship layers.
               </Typography.Text>
             </div>
           )}

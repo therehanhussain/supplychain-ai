@@ -1,108 +1,177 @@
-import React from 'react'
-import ReactDOM from 'react-dom/client'
-import './index.css'
-import { Navigate, RouterProvider, createBrowserRouter } from 'react-router-dom'
-import { ConfigProvider, ThemeConfig } from 'antd'
-import RootLayout from './Layout'
-import Console from './pages/Console/index'
-import Replay from './pages/Replay/index'
-import Survey from './pages/Survey/index'
-import LLMList from './pages/Experiment/LLMList'
-import AgentList from './pages/Experiment/AgentList'
-import WorkflowList from './pages/Experiment/WorkflowList'
-import MapList from './pages/Experiment/MapList'
-import GraphMap from './pages/maps'
-import IndustryGraph from './pages/maps/IndustryGraph'
-import CreateExperiment from './pages/Experiment/CreateExperiment'
-import Home from './pages/Home'
-import storageService from './services/storageService'
-import enUS from 'antd/locale/en_US'
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import './index.css';
+import { Navigate, RouterProvider, createBrowserRouter } from 'react-router-dom';
+import { ConfigProvider, ThemeConfig } from 'antd';
+import enUS from 'antd/locale/en_US';
+
+import { AppProvider } from './context/AppContext';
+import AppShell from './components/layout/AppShell';
+
+// Control Tower Pages
+import Dashboard from './pages/Dashboard';
+import NetworkPage from './pages/Network';
+import SuppliersPage from './pages/Suppliers';
+import InventoryPage from './pages/Inventory';
+import OrdersPage from './pages/Orders';
+import ShipmentsPage from './pages/Shipments';
+import RiskPage from './pages/Risk';
+import ForecastPage from './pages/Forecast';
+import SimulationsPage from './pages/Simulations';
+import AnalyticsPage from './pages/Analytics';
+
+// Preserved Research & Simulation Pages
+import Console from './pages/Console/index';
+import Replay from './pages/Replay/index';
+import Survey from './pages/Survey/index';
+import LLMList from './pages/Experiment/LLMList';
+import AgentList from './pages/Experiment/AgentList';
+import WorkflowList from './pages/Experiment/WorkflowList';
+import CreateExperiment from './pages/Experiment/CreateExperiment';
+import storageService from './services/storageService';
 
 const router = createBrowserRouter([
-    {
-        path: "/",
-        element: <RootLayout selectedKey='/' homePage><Home /></RootLayout>,
-    },
-    {
-        path: "/console",
-        element: <RootLayout selectedKey='/console'><Console /></RootLayout>,
-    },
-    {
-        path: "/exp/:id",
-        element: <RootLayout selectedKey='/console'><Replay /></RootLayout>,
-    },
-    {
-        path: "/replay/:id",
-        element: <RootLayout selectedKey='/console'><Replay /></RootLayout>,
-    },
-    {
-        path: "/survey",
-        element: <RootLayout selectedKey='/survey'><Survey /></RootLayout>,
-    },
-    {
-        path: "/create-experiment",
-        element: <RootLayout selectedKey='/create-experiment'><CreateExperiment /></RootLayout>,
-    },
-    {
-        path: "/llms",
-        element: <RootLayout selectedKey='/llms'><LLMList /></RootLayout>,
-    },
-    {
-        path: "/agents",
-        element: <RootLayout selectedKey='/agents'><AgentList /></RootLayout>,
-    },
-    {
-        path: "/workflows",
-        element: <RootLayout selectedKey='/workflows'><WorkflowList /></RootLayout>,
-    },
-    // {
-    //     path: "/maps",
-    //     element: <RootLayout selectedKey='/maps'><MapList /></RootLayout>,
-    // },
-    // {
-    //     path: "/graph",
-    //     element: <RootLayout selectedKey='/graph'><GraphMap /></RootLayout>,
-    // },
-    {
-        path: "/industry",
-        element: <RootLayout selectedKey='/industry'><IndustryGraph /></RootLayout>,
-    },
-    {
-        path: "*",
-        element: <Navigate to="/" />,
-    }
-])
+  // Core Control Tower
+  {
+    path: "/",
+    element: <AppShell><Dashboard /></AppShell>,
+  },
+  {
+    path: "/overview",
+    element: <AppShell><Dashboard /></AppShell>,
+  },
+  {
+    path: "/network",
+    element: <AppShell><NetworkPage /></AppShell>,
+  },
+  {
+    path: "/industry",
+    element: <AppShell><NetworkPage /></AppShell>,
+  },
+
+  // Operations
+  {
+    path: "/suppliers",
+    element: <AppShell><SuppliersPage /></AppShell>,
+  },
+  {
+    path: "/inventory",
+    element: <AppShell><InventoryPage /></AppShell>,
+  },
+  {
+    path: "/orders",
+    element: <AppShell><OrdersPage /></AppShell>,
+  },
+  {
+    path: "/shipments",
+    element: <AppShell><ShipmentsPage /></AppShell>,
+  },
+
+  // Intelligence & AI
+  {
+    path: "/risk",
+    element: <AppShell><RiskPage /></AppShell>,
+  },
+  {
+    path: "/forecast",
+    element: <AppShell><ForecastPage /></AppShell>,
+  },
+  {
+    path: "/simulations",
+    element: <AppShell><SimulationsPage /></AppShell>,
+  },
+
+  // Analytics
+  {
+    path: "/analytics",
+    element: <AppShell><AnalyticsPage /></AppShell>,
+  },
+
+  // Preserved Simulation History & Tools
+  {
+    path: "/console",
+    element: <AppShell><Console /></AppShell>,
+  },
+  {
+    path: "/exp/:id",
+    element: <AppShell><Replay /></AppShell>,
+  },
+  {
+    path: "/replay/:id",
+    element: <AppShell><Replay /></AppShell>,
+  },
+  {
+    path: "/survey",
+    element: <AppShell><Survey /></AppShell>,
+  },
+  {
+    path: "/create-experiment",
+    element: <AppShell><CreateExperiment /></AppShell>,
+  },
+  {
+    path: "/llms",
+    element: <AppShell><LLMList /></AppShell>,
+  },
+  {
+    path: "/agents",
+    element: <AppShell><AgentList /></AppShell>,
+  },
+  {
+    path: "/workflows",
+    element: <AppShell><WorkflowList /></AppShell>,
+  },
+  {
+    path: "*",
+    element: <Navigate to="/" />,
+  },
+]);
 
 const theme: ThemeConfig = {
-    token: {
-        colorPrimary: "#0000CC",
-        colorInfo: "#0000CC",
-        borderRadius: 16,
-        colorBgContainer: "#FFFFFF",
-        colorBgLayout: "#FFFFFF",
+  token: {
+    colorPrimary: "#1E40AF", // Enterprise Blue 800
+    colorInfo: "#0284C7", // Sky 600
+    colorSuccess: "#059669", // Emerald 600
+    colorWarning: "#D97706", // Amber 600
+    colorError: "#DC2626", // Red 600
+    borderRadius: 6,
+    colorBgLayout: "#F8FAFC", // Slate 50
+    colorBgContainer: "#FFFFFF",
+    colorBorder: "#E2E8F0",
+    colorText: "#0F172A",
+    colorTextSecondary: "#64748B",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+  },
+  components: {
+    Layout: {
+      headerBg: "#FFFFFF",
+      bodyBg: "#F8FAFC",
+      siderBg: "#0F172A",
     },
-    components: {
-        Layout: {
-            lightSiderBg: "#F8F8F8",
-            headerBg: "#FFFFFF",
-        },
-        Button: {
-            algorithm: true,
-            colorBgContainer: "#FFFFFF",
-        },
-        Select: {
-            colorBgContainer: "#FFFFFF",
-        }
-    }
+    Card: {
+      borderRadiusLG: 8,
+    },
+    Button: {
+      borderRadius: 6,
+      controlHeight: 36,
+      fontWeight: 500,
+    },
+    Table: {
+      borderRadius: 8,
+      headerBg: "#F8FAFC",
+      headerColor: "#475569",
+    },
+  },
 };
 
-// 初始化示例数据
+// Initialize fallback storage
 storageService.initializeExampleData().catch(error => {
-    console.error('Failed to initialize example data:', error);
+  console.error('Failed to initialize example data:', error);
 });
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-    <ConfigProvider theme={theme} locale={enUS}>
-        <RouterProvider router={router} />
-    </ConfigProvider>
-)
+  <ConfigProvider theme={theme} locale={enUS}>
+    <AppProvider>
+      <RouterProvider router={router} />
+    </AppProvider>
+  </ConfigProvider>
+);

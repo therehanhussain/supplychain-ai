@@ -22,6 +22,8 @@ from backend.app.core.logging import logger
 from backend.app.core.exceptions import register_exception_handlers
 from backend.app.middleware.request_id import RequestIdMiddleware
 from backend.app.middleware.timing import TimingMiddleware
+from backend.app.middleware.security_headers import SecurityHeadersMiddleware
+from backend.app.middleware.rate_limit import RateLimitMiddleware
 from backend.app.api.router import api_router
 from backend.app.api.v1.health import router as root_health_router
 
@@ -52,7 +54,13 @@ def create_application() -> FastAPI:
     # 2. Timing and access latency logging middleware
     app.add_middleware(TimingMiddleware)
 
-    # 3. Explicit CORS configuration (strictly from settings, no wildcard with credentials)
+    # 3. OWASP Security Headers middleware
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # 4. Tiered Rate Limiting middleware
+    app.add_middleware(RateLimitMiddleware)
+
+    # 5. Explicit CORS configuration (strictly from settings, no wildcard with credentials)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,

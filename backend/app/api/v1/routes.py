@@ -14,7 +14,9 @@ async def get_network_topology():
     topo = neo4j_service.get_topology_data()
     stats = neo4j_service.get_level_statistics()
     return RouteTopologyResponse(
-        source=topo.get("source", "fallback_file"),
+        source=topo.get("source", "offline_fallback_dataset"),
+        data_mode=topo.get("data_mode", "DEGRADED"),
+        status_message=topo.get("status_message", "Operating in offline fallback mode."),
         relationships=topo.get("relationships", []),
         tier_statistics=stats,
     )

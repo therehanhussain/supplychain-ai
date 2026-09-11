@@ -1,9 +1,8 @@
-"""Agents & Simulation Orchestration Endpoints (/api/v1/agents)."""
-
+import asyncio
 import uuid
 from datetime import datetime
-from typing import List
-from fastapi import APIRouter, status
+from typing import List, Optional
+from fastapi import APIRouter, status, HTTPException
 from fastapi.responses import JSONResponse
 
 from backend.app.schemas.agent import (
@@ -11,7 +10,7 @@ from backend.app.schemas.agent import (
     SimulationDispatchResponse,
     AgentProfileResponse,
 )
-from backend.app.agents.adapter import simulation_adapter
+from backend.app.services.simulation_service import simulation_service, SimulationState
 from backend.app.core.logging import logger
 
 router = APIRouter(prefix="/agents", tags=["Agents & Simulation Engine"])
@@ -20,11 +19,15 @@ router = APIRouter(prefix="/agents", tags=["Agents & Simulation Engine"])
 @router.get("", summary="Get agents service overview")
 async def get_agents_overview():
     """Returns overview of agent simulation service status and active firms."""
+    tasks = await simulation_service.list_tasks()
+    active_count = sum(1 for t in tasks if t.status == SimulationState.RUNNING)
     return {
         "service": "agent_simulation_engine",
         "total_firms": 16,
         "engine": "AgentSociety / Ray bridge",
-        "status": "idle",
+        "active_simulations": active_count,
+        "total_tracked_tasks": len(tasks),
+        "status": "running" if active_count > 0 else "idle",
     }
 
 
@@ -34,32 +37,49 @@ async def dispatch_simulation(payload: SimulationDispatchRequest):
 
     Does NOT block synchronous HTTP request thread. Returns immediate 202 Accepted with tracking ID.
     """
-    experiment_id = f"exp_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{str(uuid.uuid4())[:8]}"
-    clean_payload = simulation_adapter.prepare_simulation_payload(payload.model_dump())
+    task = await simulation_service.create_task(
+        name=payload.name or "supply_chain_simulation",
+        num_days=payload.num_days,
+        num_firms=payload.num_firms,
+    )
 
-    # In production, this queues to Celery: run_agent_simulation_task.delay(experiment_id, clean_payload)
-    # The adapter tracks execution state
-    logger.info(f"Accepted simulation dispatch request for experiment_id={experiment_id}")
+    # Schedule asynchronous execution in background task worker
+    asyncio.create_task(simulation_service.run_simulation_worker(task.experiment_id))
+
+    logger.info(f"Accepted simulation dispatch request for experiment_id={task.experiment_id}")
 
     return SimulationDispatchResponse(
-        experiment_id=experiment_id,
-        task_id=f"task_{str(uuid.uuid4())[:8]}",
+        experiment_id=task.experiment_id,
+        task_id=task.task_id,
         status="queued",
-        message="Simulation successfully dispatched to background Celery worker",
+        message="Simulation successfully dispatched to background worker",
     )
 
 
 @router.get("/simulations/{experiment_id}/status", summary="Query simulation execution status")
 async def get_simulation_status(experiment_id: str):
-    """Polls real-time progress of a running simulation job."""
-    job_status = simulation_adapter.get_job_status(experiment_id)
-    if job_status:
-        return {"experiment_id": experiment_id, **job_status}
+    """Polls real-time progress and lifecycle state of a simulation job."""
+    task = await simulation_service.get_task(experiment_id)
+    if task:
+        return task.model_dump()
     return {
         "experiment_id": experiment_id,
-        "status": "completed",
+        "status": "COMPLETED",
         "progress_pct": 100,
         "message": "Experiment completed or found in historical telemetry archive.",
+    }
+
+
+@router.post("/simulations/{experiment_id}/cancel", summary="Cancel active or queued simulation")
+async def cancel_simulation(experiment_id: str):
+    """Abort a running or queued simulation experiment."""
+    task = await simulation_service.cancel_task(experiment_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Simulation task '{experiment_id}' not found")
+    return {
+        "experiment_id": task.experiment_id,
+        "status": task.status.value,
+        "message": "Simulation cancelled successfully",
     }
 
 
