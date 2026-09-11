@@ -20,6 +20,12 @@ import ForecastPage from './pages/Forecast';
 import SimulationsPage from './pages/Simulations';
 import AnalyticsPage from './pages/Analytics';
 
+// Employee Operations Portal (Phase 13.2)
+import EmployeeDashboard from './pages/Employee/EmployeeDashboard';
+import MyWorkOrders from './pages/Employee/MyWorkOrders';
+import WorkOrderDetail from './pages/Employee/WorkOrderDetail';
+import MyActivity from './pages/Employee/MyActivity';
+
 // Preserved Research & Simulation Pages
 import Console from './pages/Console/index';
 import Replay from './pages/Replay/index';
@@ -65,6 +71,24 @@ const router = createBrowserRouter([
   {
     path: "/shipments",
     element: <AppShell><ShipmentsPage /></AppShell>,
+  },
+
+  // Employee Operations Portal (Phase 13.2)
+  {
+    path: "/employee",
+    element: <AppShell><EmployeeDashboard /></AppShell>,
+  },
+  {
+    path: "/employee/work-orders",
+    element: <AppShell><MyWorkOrders /></AppShell>,
+  },
+  {
+    path: "/employee/work-orders/:id",
+    element: <AppShell><WorkOrderDetail /></AppShell>,
+  },
+  {
+    path: "/employee/activity",
+    element: <AppShell><MyActivity /></AppShell>,
   },
 
   // Intelligence & AI

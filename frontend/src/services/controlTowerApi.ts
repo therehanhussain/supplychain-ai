@@ -16,6 +16,101 @@ export interface ProvenanceEnvelope<T> {
   sourceNote?: string;
 }
 
+
+// -----------------------------------------------------------------------------
+// Phase 13.2: Employee Operations Models
+// -----------------------------------------------------------------------------
+
+export interface MaterialRequirementItem {
+  id: string;
+  organization_id: string;
+  production_order_id?: string;
+  work_order_id?: string;
+  product_id: string;
+  product_sku?: string;
+  product_name?: string;
+  required_quantity: number;
+  issued_quantity: number;
+  consumed_quantity: number;
+  returned_quantity: number;
+  wastage_quantity: number;
+  remaining_issued_holding: number;
+  variance_quantity?: number;
+  unit_of_measure: string;
+  created_at: string;
+}
+
+export interface WorkOrderDetailItem {
+  id: string;
+  organization_id: string;
+  production_order_id: string;
+  production_order_number?: string;
+  work_order_number: string;
+  warehouse_id?: string;
+  warehouse_code?: string;
+  production_area?: string;
+  assigned_user_id?: string;
+  assigned_user_name?: string;
+  planned_quantity: number;
+  completed_quantity: number;
+  status: string;
+  started_at?: string;
+  completed_at?: string;
+  notes?: string;
+  created_at: string;
+  product_id?: string;
+  product_sku?: string;
+  product_name?: string;
+  materials: MaterialRequirementItem[];
+}
+
+export interface MaterialRequestItem {
+  id: string;
+  organization_id: string;
+  work_order_id: string;
+  work_order_number?: string;
+  product_id: string;
+  product_sku?: string;
+  product_name?: string;
+  requested_by_user_id: string;
+  requested_by_name?: string;
+  quantity: number;
+  unit_of_measure?: string;
+  status: string;
+  reason: string;
+  notes?: string;
+  created_at: string;
+}
+
+export interface EmployeeDashboardStats {
+  active_work_orders: number;
+  materials_in_holding: number;
+  today_consumed_qty: number;
+  today_returned_qty: number;
+  today_wastage_qty: number;
+  unit: string;
+}
+
+export interface EmployeeActivityItem {
+  id: string;
+  organization_id: string;
+  product_id: string;
+  product_sku?: string;
+  product_name?: string;
+  warehouse_id?: string;
+  warehouse_code?: string;
+  work_order_id?: string;
+  employee_id?: string;
+  performed_by_user_id: string;
+  performed_by_name?: string;
+  transaction_type: string;
+  quantity: number;
+  unit_of_measure: string;
+  reason?: string;
+  notes?: string;
+  created_at: string;
+}
+
 // -----------------------------------------------------------------------------
 // Core Domain Models
 // -----------------------------------------------------------------------------
@@ -403,6 +498,123 @@ class ControlTowerApiService {
   async getTopology(): Promise<any> {
     return await apiClient.get('/api/v1/routes/topology');
   }
+
+  // ---------------------------------------------------------------------------
+  // Phase 13.2: Employee Operations API
+  // ---------------------------------------------------------------------------
+
+  async getMyWorkOrders(status?: string): Promise<ProvenanceEnvelope<WorkOrderDetailItem[]>> {
+    try {
+      const url = status ? `/api/v1/manufacturing/my-work-orders?status=${status}` : '/api/v1/manufacturing/my-work-orders';
+      const items = await apiClient.get<WorkOrderDetailItem[]>(url);
+      return { data: items || [], provenance: 'LIVE', sourceNote: 'Assigned Work Orders from Central Ledger' };
+    } catch {
+      return { data: [], provenance: 'FALLBACK', sourceNote: 'Work orders unavailable' };
+    }
+  }
+
+  async getWorkOrderDetail(id: string): Promise<ProvenanceEnvelope<WorkOrderDetailItem | null>> {
+    try {
+      const item = await apiClient.get<WorkOrderDetailItem>(`/api/v1/manufacturing/work-orders/${id}`);
+      return { data: item, provenance: 'LIVE', sourceNote: 'Authoritative Work Order Detail' };
+    } catch {
+      return { data: null, provenance: 'FALLBACK', sourceNote: 'Work order detail unavailable' };
+    }
+  }
+
+  async getWorkOrderMaterials(id: string): Promise<ProvenanceEnvelope<MaterialRequirementItem[]>> {
+    try {
+      const items = await apiClient.get<MaterialRequirementItem[]>(`/api/v1/manufacturing/work-orders/${id}/materials`);
+      return { data: items || [], provenance: 'LIVE', sourceNote: 'Authoritative Material Requirements' };
+    } catch {
+      return { data: [], provenance: 'FALLBACK', sourceNote: 'Material requirements unavailable' };
+    }
+  }
+
+  async getEmployeeDashboardStats(): Promise<ProvenanceEnvelope<EmployeeDashboardStats>> {
+    const fallbackStats: EmployeeDashboardStats = {
+      active_work_orders: 0,
+      materials_in_holding: 0,
+      today_consumed_qty: 0,
+      today_returned_qty: 0,
+      today_wastage_qty: 0,
+      unit: 'kg / units',
+    };
+    try {
+      const stats = await apiClient.get<EmployeeDashboardStats>('/api/v1/manufacturing/employee/dashboard-stats');
+      return { data: stats || fallbackStats, provenance: 'LIVE', sourceNote: 'Operational Shift Aggregates' };
+    } catch {
+      return { data: fallbackStats, provenance: 'FALLBACK', sourceNote: 'Employee stats offline' };
+    }
+  }
+
+  async getEmployeeActivity(limit = 50): Promise<ProvenanceEnvelope<EmployeeActivityItem[]>> {
+    try {
+      const items = await apiClient.get<EmployeeActivityItem[]>(`/api/v1/manufacturing/employee/activity?limit=${limit}`);
+      return { data: items || [], provenance: 'LIVE', sourceNote: 'Authoritative Operator Transaction Ledger' };
+    } catch {
+      return { data: [], provenance: 'FALLBACK', sourceNote: 'Employee activity offline' };
+    }
+  }
+
+  async consumeMaterial(payload: {
+    work_order_id: string;
+    product_id: string;
+    quantity: number;
+    unit_of_measure?: string;
+    reason?: string;
+    notes?: string;
+    idempotency_key?: string;
+  }): Promise<any> {
+    return await apiClient.post('/api/v1/manufacturing/transactions/consume', payload);
+  }
+
+  async returnMaterial(payload: {
+    work_order_id: string;
+    product_id: string;
+    quantity: number;
+    unit_of_measure?: string;
+    reason?: string;
+    notes?: string;
+    idempotency_key?: string;
+  }): Promise<any> {
+    return await apiClient.post('/api/v1/manufacturing/transactions/return', payload);
+  }
+
+  async reportWastage(payload: {
+    work_order_id: string;
+    product_id: string;
+    quantity: number;
+    unit_of_measure?: string;
+    reason: string;
+    notes?: string;
+    idempotency_key?: string;
+  }): Promise<any> {
+    return await apiClient.post('/api/v1/manufacturing/transactions/waste', payload);
+  }
+
+  async createMaterialRequest(payload: {
+    work_order_id: string;
+    product_id: string;
+    quantity: number;
+    unit_of_measure?: string;
+    reason: string;
+    notes?: string;
+  }): Promise<any> {
+    return await apiClient.post('/api/v1/manufacturing/material-requests', payload);
+  }
+
+  async listMaterialRequests(work_order_id?: string, my_requests = true): Promise<ProvenanceEnvelope<MaterialRequestItem[]>> {
+    try {
+      let url = `/api/v1/manufacturing/material-requests?my_requests=${my_requests}`;
+      if (work_order_id) url += `&work_order_id=${work_order_id}`;
+      const items = await apiClient.get<MaterialRequestItem[]>(url);
+      return { data: items || [], provenance: 'LIVE', sourceNote: 'Floor Material Requisitions' };
+    } catch {
+      return { data: [], provenance: 'FALLBACK', sourceNote: 'Requisitions offline' };
+    }
+  }
+
 }
 
 export const controlTowerApi = new ControlTowerApiService();

@@ -43,6 +43,9 @@ import {
   LogoutOutlined,
   LoginOutlined,
   SettingOutlined,
+  ToolOutlined,
+  FileTextOutlined,
+  HistoryOutlined,
   CheckCircleFilled,
   ExclamationCircleFilled,
   CloseCircleFilled,
@@ -127,6 +130,31 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           key: '/shipments',
           icon: <CarOutlined style={{ fontSize: 15 }} />,
           label: 'Shipments',
+        },
+      ],
+    },
+    {
+      type: 'group',
+      label: (
+        <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 700, letterSpacing: '0.08em' }}>
+          EMPLOYEE OPERATIONS
+        </span>
+      ),
+      children: [
+        {
+          key: '/employee',
+          icon: <ToolOutlined style={{ fontSize: 15 }} />,
+          label: 'Employee Hub',
+        },
+        {
+          key: '/employee/work-orders',
+          icon: <FileTextOutlined style={{ fontSize: 15 }} />,
+          label: 'My Work Orders',
+        },
+        {
+          key: '/employee/activity',
+          icon: <HistoryOutlined style={{ fontSize: 15 }} />,
+          label: 'My Activity',
         },
       ],
     },

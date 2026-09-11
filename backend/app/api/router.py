@@ -34,6 +34,7 @@ v1_router.include_router(risk_router)
 v1_router.include_router(agents_router)
 v1_router.include_router(analytics_router)
 v1_router.include_router(manufacturing_router)
+v1_router.include_router(manufacturing_router, prefix="/manufacturing")
 
 
 # Master root router

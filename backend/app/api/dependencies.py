@@ -81,7 +81,7 @@ async def get_tenant_context(
     db: AsyncSession = Depends(get_db),
 ) -> TenantContext:
     """Provide TenantContext for strict multi-tenant data access.
-    
+
     If Bearer credentials are provided, validates user and extracts tenant organization_id.
     If credentials are omitted in development mode, defaults to the default development tenant.
     """
@@ -109,6 +109,17 @@ async def get_tenant_context(
         organization_id=org.id,
         user=None,
         role=UserRole.ADMIN,
+    )
+
+
+async def get_auth_tenant_context(
+    current_user: User = Depends(get_current_user),
+) -> TenantContext:
+    """Provide strictly authenticated TenantContext, raising 401 if unauthenticated."""
+    return TenantContext(
+        organization_id=current_user.organization_id,
+        user=current_user,
+        role=current_user.role,
     )
 
 

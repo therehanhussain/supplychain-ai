@@ -4,9 +4,11 @@ from fastapi import APIRouter, Depends, status, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.database import get_db
-from backend.app.api.dependencies import get_tenant_context, TenantContext
+from backend.app.api.dependencies import get_tenant_context, get_auth_tenant_context, TenantContext
 from backend.app.services.material_service import MaterialTraceabilityService
 from backend.app.repositories.stock_transaction import StockTransactionRepository
+from backend.app.models.enums import TransactionType
+from backend.app.models.user import UserRole
 from backend.app.schemas.manufacturing import (
     ProductionOrderCreate,
     ProductionOrderResponse,
@@ -18,6 +20,14 @@ from backend.app.schemas.manufacturing import (
     StockTransactionResponse,
     StockTransferCreate,
     TraceabilityTimelineResponse,
+    MaterialRequestCreate,
+    MaterialRequestResponse,
+    MaterialRequestUpdate,
+    ConsumeMaterialRequest,
+    ReturnMaterialRequest,
+    WastageMaterialRequest,
+    WorkOrderDetailResponse,
+    EmployeeDashboardStats,
 )
 
 router = APIRouter(tags=["Manufacturing & Material Traceability"])
@@ -274,3 +284,191 @@ async def get_material_traceability(
 ):
     service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
     return await service.get_material_traceability(product_id)
+
+# ------------------------------------------------------------------------------
+# Phase 13.2: Employee Operations Endpoints
+# ------------------------------------------------------------------------------
+
+@router.get(
+    "/my-work-orders",
+    response_model=List[WorkOrderDetailResponse],
+    summary="Get work orders assigned to the current employee",
+)
+async def get_my_work_orders(
+    status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.get_my_work_orders(status=status, skip=skip, limit=limit)
+
+
+@router.get(
+    "/work-orders/{id}",
+    response_model=WorkOrderDetailResponse,
+    summary="Get detailed view of a specific work order",
+)
+async def get_work_order_detail(
+    id: str,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    is_admin = tenant.role in (UserRole.ADMIN, "ADMIN")
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.get_work_order_details(work_order_id=id, is_admin=is_admin)
+
+
+@router.get(
+    "/work-orders/{id}/materials",
+    response_model=List[MaterialRequirementResponse],
+    summary="List required materials and current holding for a work order",
+)
+async def get_work_order_materials(
+    id: str,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    is_admin = tenant.role in (UserRole.ADMIN, "ADMIN")
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.get_work_order_materials(work_order_id=id, is_admin=is_admin)
+
+
+@router.get(
+    "/employee/dashboard-stats",
+    response_model=EmployeeDashboardStats,
+    summary="Get aggregated operational KPIs for current employee",
+)
+async def get_employee_dashboard_stats(
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.get_employee_dashboard_stats()
+
+
+@router.get(
+    "/employee/activity",
+    response_model=List[StockTransactionResponse],
+    summary="Get transaction activity log for current employee",
+)
+async def get_employee_activity(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=200),
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.get_employee_activity(skip=skip, limit=limit)
+
+
+@router.post(
+    "/material-requests",
+    response_model=MaterialRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Employee submits request for additional raw material",
+)
+async def create_material_request(
+    payload: MaterialRequestCreate,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.create_material_request(payload)
+
+
+@router.get(
+    "/material-requests",
+    response_model=List[MaterialRequestResponse],
+    summary="List material requests for work order or employee",
+)
+async def list_material_requests(
+    work_order_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    my_requests: bool = Query(False),
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    is_admin = tenant.role in (UserRole.ADMIN, "ADMIN")
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.list_material_requests(
+        work_order_id=work_order_id,
+        status=status,
+        my_requests_only=(my_requests or not is_admin),
+    )
+
+
+@router.post(
+    "/transactions/consume",
+    response_model=StockTransactionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Operator consumes material from work order holding",
+)
+async def consume_material(
+    payload: ConsumeMaterialRequest,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    tx_payload = StockTransactionCreate(
+        work_order_id=payload.work_order_id,
+        product_id=payload.product_id,
+        transaction_type=TransactionType.CONSUMPTION,
+        quantity=payload.quantity,
+        unit_of_measure=payload.unit_of_measure,
+        reason=payload.reason or "Production assembly",
+        notes=payload.notes,
+        reference_id=payload.idempotency_key,
+    )
+    return await service.record_transaction(tx_payload)
+
+
+@router.post(
+    "/transactions/return",
+    response_model=StockTransactionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Operator returns surplus material from holding to warehouse",
+)
+async def return_material(
+    payload: ReturnMaterialRequest,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    tx_payload = StockTransactionCreate(
+        work_order_id=payload.work_order_id,
+        product_id=payload.product_id,
+        transaction_type=TransactionType.RETURN,
+        quantity=payload.quantity,
+        unit_of_measure=payload.unit_of_measure,
+        reason=payload.reason or "Surplus material returned",
+        notes=payload.notes,
+        reference_id=payload.idempotency_key,
+    )
+    return await service.record_transaction(tx_payload)
+
+
+@router.post(
+    "/transactions/waste",
+    response_model=StockTransactionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Operator reports scrap or wastage from work order holding",
+)
+async def report_wastage(
+    payload: WastageMaterialRequest,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    tx_payload = StockTransactionCreate(
+        work_order_id=payload.work_order_id,
+        product_id=payload.product_id,
+        transaction_type=TransactionType.WASTAGE,
+        quantity=payload.quantity,
+        unit_of_measure=payload.unit_of_measure,
+        reason=payload.reason,
+        notes=payload.notes,
+        reference_id=payload.idempotency_key,
+    )
+    return await service.record_transaction(tx_payload)

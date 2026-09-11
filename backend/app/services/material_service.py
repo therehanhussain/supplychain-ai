@@ -21,9 +21,10 @@ from backend.app.models.audit_log import AuditLog
 from backend.app.models.production_order import ProductionOrder
 from backend.app.models.work_order import WorkOrder
 from backend.app.models.material_requirement import MaterialRequirement
+from backend.app.models.material_request import MaterialRequest
 from backend.app.models.stock_transaction import StockTransaction
 from backend.app.models.enums import TransactionType, UnitOfMeasure, ProductionOrderStatus, WorkOrderStatus
-from backend.app.models.user import User
+from backend.app.models.user import User, UserRole
 
 from backend.app.schemas.manufacturing import (
     StockTransactionCreate,
@@ -37,7 +38,13 @@ from backend.app.schemas.manufacturing import (
     MaterialRequirementResponse,
     TraceabilityTimelineResponse,
     TraceabilityTimelineEntry,
+    MaterialRequestCreate,
+    MaterialRequestResponse,
+    MaterialRequestUpdate,
+    WorkOrderDetailResponse,
+    EmployeeDashboardStats,
 )
+from datetime import datetime, timezone
 
 
 class MaterialTraceabilityService:
@@ -340,6 +347,50 @@ class MaterialTraceabilityService:
         tx_type = payload.transaction_type
         quantity = payload.quantity
 
+        # Idempotency check: if reference_id provided, avoid double mutation
+        if payload.reference_id:
+            existing_tx = await self.db.execute(
+                select(StockTransaction)
+                .options(
+                    selectinload(StockTransaction.product),
+                    selectinload(StockTransaction.warehouse),
+                    selectinload(StockTransaction.performed_by_user),
+                )
+                .where(
+                    StockTransaction.organization_id == self.organization_id,
+                    StockTransaction.reference_id == payload.reference_id,
+                    StockTransaction.transaction_type == tx_type,
+                )
+            )
+            dup = existing_tx.scalar_one_or_none()
+            if dup:
+                return StockTransactionResponse(
+                    id=dup.id,
+                    organization_id=dup.organization_id,
+                    inventory_id=dup.inventory_id,
+                    product_id=dup.product_id,
+                    product_sku=dup.product.sku if dup.product else None,
+                    product_name=dup.product.name if dup.product else None,
+                    warehouse_id=dup.warehouse_id,
+                    warehouse_code=dup.warehouse.code if dup.warehouse else None,
+                    work_order_id=dup.work_order_id,
+                    production_order_id=dup.production_order_id,
+                    employee_id=dup.employee_id,
+                    employee_name=dup.performed_by_user.full_name if dup.performed_by_user else None,
+                    performed_by_user_id=dup.performed_by_user_id,
+                    performed_by_name=dup.performed_by_user.full_name if dup.performed_by_user else "User",
+                    transaction_type=dup.transaction_type,
+                    quantity=dup.quantity,
+                    unit_of_measure=dup.unit_of_measure,
+                    reason=dup.reason,
+                    source_location=dup.source_location,
+                    destination_location=dup.destination_location,
+                    reference_type=dup.reference_type,
+                    reference_id=dup.reference_id,
+                    notes=dup.notes,
+                    created_at=dup.created_at,
+                )
+
         # Enforce reason requirement on adjustments, wastage, damage, expiry
         if tx_type in (TransactionType.ADJUSTMENT, TransactionType.WASTAGE, TransactionType.DAMAGE, TransactionType.EXPIRY):
             if not payload.reason or not payload.reason.strip():
@@ -348,6 +399,23 @@ class MaterialTraceabilityService:
         # Handle Material Requirement link if work_order_id is specified
         requirement: Optional[MaterialRequirement] = None
         if payload.work_order_id:
+            # Verify work order exists and caller authorization
+            wo_res = await self.db.execute(
+                select(WorkOrder).where(
+                    WorkOrder.organization_id == self.organization_id,
+                    WorkOrder.id == payload.work_order_id,
+                )
+            )
+            wo_obj = wo_res.scalar_one_or_none()
+            if not wo_obj:
+                raise AppException(f"Work order '{payload.work_order_id}' not found.", 404, "WORK_ORDER_NOT_FOUND")
+
+            # Non-admin operators can only act on work orders assigned to them
+            if tx_type in (TransactionType.CONSUMPTION, TransactionType.RETURN, TransactionType.WASTAGE):
+                caller = await self.db.get(User, self.user_id)
+                if caller and caller.role != "ADMIN" and caller.role != UserRole.ADMIN:
+                    if wo_obj.assigned_user_id and wo_obj.assigned_user_id != self.user_id:
+                        raise AppException("Access forbidden. You are not assigned to this work order.", 403, "NOT_ASSIGNED_TO_WORK_ORDER")
             req_res = await self.db.execute(
                 select(MaterialRequirement).where(
                     MaterialRequirement.organization_id == self.organization_id,
@@ -682,6 +750,11 @@ class MaterialTraceabilityService:
             return inv, inv.product, inv.warehouse
 
         # Path 2: warehouse_id + product_id
+        if not payload.warehouse_id and payload.work_order_id:
+            wo = await self.db.get(WorkOrder, payload.work_order_id)
+            if wo and wo.warehouse_id:
+                payload.warehouse_id = wo.warehouse_id
+
         if not payload.warehouse_id or not payload.product_id:
             raise AppException("Must supply inventory_id OR both warehouse_id and product_id.", 400, "MISSING_IDENTIFIERS")
 
@@ -750,3 +823,402 @@ class MaterialTraceabilityService:
                 )
 
         return inventory, product, warehouse
+
+    # --------------------------------------------------------------------------
+    # Phase 13.2: Employee Operations Methods
+    # --------------------------------------------------------------------------
+
+    async def get_my_work_orders(
+        self, status: Optional[str] = None, skip: int = 0, limit: int = 100
+    ) -> List[WorkOrderDetailResponse]:
+        """Fetch work orders assigned to the authenticated employee."""
+        query = (
+            select(WorkOrder)
+            .options(
+                selectinload(WorkOrder.production_order).selectinload(ProductionOrder.product),
+                selectinload(WorkOrder.warehouse),
+                selectinload(WorkOrder.assigned_user),
+                selectinload(WorkOrder.material_requirements).selectinload(MaterialRequirement.product),
+            )
+            .where(
+                WorkOrder.organization_id == self.organization_id,
+                WorkOrder.assigned_user_id == self.user_id,
+            )
+        )
+        if status:
+            query = query.where(WorkOrder.status == status)
+        query = query.order_by(WorkOrder.created_at.desc()).offset(skip).limit(limit)
+
+        res = await self.db.execute(query)
+        orders = res.scalars().all()
+
+        results: List[WorkOrderDetailResponse] = []
+        for w in orders:
+            prod = w.production_order.product if w.production_order and w.production_order.product else None
+            materials = [
+                MaterialRequirementResponse(
+                    id=m.id,
+                    organization_id=m.organization_id,
+                    production_order_id=m.production_order_id,
+                    work_order_id=m.work_order_id,
+                    product_id=m.product_id,
+                    product_sku=m.product.sku if m.product else None,
+                    product_name=m.product.name if m.product else None,
+                    required_quantity=m.required_quantity,
+                    issued_quantity=m.issued_quantity,
+                    consumed_quantity=m.consumed_quantity,
+                    returned_quantity=m.returned_quantity,
+                    wastage_quantity=m.wastage_quantity,
+                    remaining_issued_holding=m.remaining_issued_holding,
+                    variance_quantity=m.variance_quantity,
+                    unit_of_measure=m.unit_of_measure,
+                    created_at=m.created_at,
+                    updated_at=m.updated_at,
+                )
+                for m in w.material_requirements
+            ]
+
+            results.append(
+                WorkOrderDetailResponse(
+                    id=w.id,
+                    organization_id=w.organization_id,
+                    production_order_id=w.production_order_id,
+                    production_order_number=w.production_order.order_number if w.production_order else None,
+                    work_order_number=w.work_order_number,
+                    warehouse_id=w.warehouse_id,
+                    warehouse_code=w.warehouse.code if w.warehouse else None,
+                    production_area=w.production_area,
+                    assigned_user_id=w.assigned_user_id,
+                    assigned_user_name=w.assigned_user.full_name or w.assigned_user.email if w.assigned_user else None,
+                    planned_quantity=w.planned_quantity,
+                    completed_quantity=w.completed_quantity,
+                    status=w.status,
+                    started_at=w.started_at,
+                    completed_at=w.completed_at,
+                    notes=w.notes,
+                    created_at=w.created_at,
+                    updated_at=w.updated_at,
+                    product_id=prod.id if prod else None,
+                    product_sku=prod.sku if prod else None,
+                    product_name=prod.name if prod else None,
+                    materials=materials,
+                )
+            )
+        return results
+
+    async def get_work_order_details(self, work_order_id: str, is_admin: bool = False) -> WorkOrderDetailResponse:
+        """Fetch single work order details with strict authorization check."""
+        res = await self.db.execute(
+            select(WorkOrder)
+            .options(
+                selectinload(WorkOrder.production_order).selectinload(ProductionOrder.product),
+                selectinload(WorkOrder.warehouse),
+                selectinload(WorkOrder.assigned_user),
+                selectinload(WorkOrder.material_requirements).selectinload(MaterialRequirement.product),
+            )
+            .where(
+                WorkOrder.organization_id == self.organization_id,
+                WorkOrder.id == work_order_id,
+            )
+        )
+        w = res.scalar_one_or_none()
+        if not w:
+            raise AppException(f"Work order '{work_order_id}' not found.", 404, "WORK_ORDER_NOT_FOUND")
+
+        if not is_admin and w.assigned_user_id and w.assigned_user_id != self.user_id:
+            raise AppException("Access forbidden. You are not assigned to this work order.", 403, "NOT_ASSIGNED_TO_WORK_ORDER")
+
+        prod = w.production_order.product if w.production_order and w.production_order.product else None
+        materials = [
+            MaterialRequirementResponse(
+                id=m.id,
+                organization_id=m.organization_id,
+                production_order_id=m.production_order_id,
+                work_order_id=m.work_order_id,
+                product_id=m.product_id,
+                product_sku=m.product.sku if m.product else None,
+                product_name=m.product.name if m.product else None,
+                required_quantity=m.required_quantity,
+                issued_quantity=m.issued_quantity,
+                consumed_quantity=m.consumed_quantity,
+                returned_quantity=m.returned_quantity,
+                wastage_quantity=m.wastage_quantity,
+                remaining_issued_holding=m.remaining_issued_holding,
+                variance_quantity=m.variance_quantity,
+                unit_of_measure=m.unit_of_measure,
+                created_at=m.created_at,
+                updated_at=m.updated_at,
+            )
+            for m in w.material_requirements
+        ]
+
+        return WorkOrderDetailResponse(
+            id=w.id,
+            organization_id=w.organization_id,
+            production_order_id=w.production_order_id,
+            production_order_number=w.production_order.order_number if w.production_order else None,
+            work_order_number=w.work_order_number,
+            warehouse_id=w.warehouse_id,
+            warehouse_code=w.warehouse.code if w.warehouse else None,
+            production_area=w.production_area,
+            assigned_user_id=w.assigned_user_id,
+            assigned_user_name=w.assigned_user.full_name or w.assigned_user.email if w.assigned_user else None,
+            planned_quantity=w.planned_quantity,
+            completed_quantity=w.completed_quantity,
+            status=w.status,
+            started_at=w.started_at,
+            completed_at=w.completed_at,
+            notes=w.notes,
+            created_at=w.created_at,
+            updated_at=w.updated_at,
+            product_id=prod.id if prod else None,
+            product_sku=prod.sku if prod else None,
+            product_name=prod.name if prod else None,
+            materials=materials,
+        )
+
+    async def get_work_order_materials(self, work_order_id: str, is_admin: bool = False) -> List[MaterialRequirementResponse]:
+        """Fetch material requirements for a work order with authorization check."""
+        wo = await self.db.get(WorkOrder, work_order_id)
+        if not wo or wo.organization_id != self.organization_id:
+            raise AppException(f"Work order '{work_order_id}' not found.", 404, "WORK_ORDER_NOT_FOUND")
+
+        if not is_admin and wo.assigned_user_id and wo.assigned_user_id != self.user_id:
+            raise AppException("Access forbidden. You are not assigned to this work order.", 403, "NOT_ASSIGNED_TO_WORK_ORDER")
+
+        res = await self.db.execute(
+            select(MaterialRequirement)
+            .options(selectinload(MaterialRequirement.product))
+            .where(
+                MaterialRequirement.organization_id == self.organization_id,
+                MaterialRequirement.work_order_id == work_order_id,
+            )
+        )
+        reqs = res.scalars().all()
+        return [
+            MaterialRequirementResponse(
+                id=m.id,
+                organization_id=m.organization_id,
+                production_order_id=m.production_order_id,
+                work_order_id=m.work_order_id,
+                product_id=m.product_id,
+                product_sku=m.product.sku if m.product else None,
+                product_name=m.product.name if m.product else None,
+                required_quantity=m.required_quantity,
+                issued_quantity=m.issued_quantity,
+                consumed_quantity=m.consumed_quantity,
+                returned_quantity=m.returned_quantity,
+                wastage_quantity=m.wastage_quantity,
+                remaining_issued_holding=m.remaining_issued_holding,
+                variance_quantity=m.variance_quantity,
+                unit_of_measure=m.unit_of_measure,
+                created_at=m.created_at,
+                updated_at=m.updated_at,
+            )
+            for m in reqs
+        ]
+
+    async def create_material_request(self, payload: MaterialRequestCreate) -> MaterialRequestResponse:
+        """Create a new floor requisition for material."""
+        wo = await self.db.get(WorkOrder, payload.work_order_id)
+        if not wo or wo.organization_id != self.organization_id:
+            raise AppException(f"Work order '{payload.work_order_id}' not found.", 404, "WORK_ORDER_NOT_FOUND")
+
+        caller = await self.db.get(User, self.user_id)
+        if caller and caller.role != "ADMIN" and caller.role != UserRole.ADMIN:
+            if wo.assigned_user_id and wo.assigned_user_id != self.user_id:
+                raise AppException("Access forbidden. You are not assigned to this work order.", 403, "NOT_ASSIGNED_TO_WORK_ORDER")
+
+        prod_res = await self.db.execute(
+            select(Product).where(
+                Product.organization_id == self.organization_id,
+                (Product.id == payload.product_id) | (Product.sku == payload.product_id),
+            )
+        )
+        prod = prod_res.scalar_one_or_none()
+        if not prod:
+            raise AppException(f"Product '{payload.product_id}' not found.", 404, "PRODUCT_NOT_FOUND")
+
+        req = MaterialRequest(
+            organization_id=self.organization_id,
+            work_order_id=wo.id,
+            product_id=prod.id,
+            requested_by_user_id=self.user_id,
+            quantity=payload.quantity,
+            unit_of_measure=payload.unit_of_measure or prod.unit_of_measure,
+            status="PENDING",
+            reason=payload.reason,
+            notes=payload.notes,
+        )
+        self.db.add(req)
+
+        audit = AuditLog(
+            organization_id=self.organization_id,
+            user_id=self.user_id,
+            action="MATERIAL_REQUEST_CREATED",
+            entity_type="MaterialRequest",
+            entity_id=req.id,
+            details=f"WO={wo.work_order_number}, Product={prod.sku}, Qty={req.quantity}, Reason={req.reason}",
+        )
+        self.db.add(audit)
+
+        await self.db.commit()
+        await self.db.refresh(req)
+
+        return MaterialRequestResponse(
+            id=req.id,
+            organization_id=req.organization_id,
+            work_order_id=req.work_order_id,
+            work_order_number=wo.work_order_number,
+            product_id=req.product_id,
+            product_sku=prod.sku,
+            product_name=prod.name,
+            requested_by_user_id=req.requested_by_user_id,
+            requested_by_name=caller.full_name or caller.email if caller else "Operator",
+            quantity=req.quantity,
+            unit_of_measure=req.unit_of_measure,
+            status=req.status,
+            reason=req.reason,
+            notes=req.notes,
+            created_at=req.created_at,
+            updated_at=req.updated_at,
+        )
+
+    async def list_material_requests(
+        self, work_order_id: Optional[str] = None, status: Optional[str] = None, my_requests_only: bool = False
+    ) -> List[MaterialRequestResponse]:
+        """List material requests for the organization or current user."""
+        query = (
+            select(MaterialRequest)
+            .options(
+                selectinload(MaterialRequest.work_order),
+                selectinload(MaterialRequest.product),
+                selectinload(MaterialRequest.requester),
+            )
+            .where(MaterialRequest.organization_id == self.organization_id)
+        )
+        if my_requests_only:
+            query = query.where(MaterialRequest.requested_by_user_id == self.user_id)
+        if work_order_id:
+            query = query.where(MaterialRequest.work_order_id == work_order_id)
+        if status:
+            query = query.where(MaterialRequest.status == status)
+
+        query = query.order_by(MaterialRequest.created_at.desc())
+        res = await self.db.execute(query)
+        reqs = res.scalars().all()
+
+        return [
+            MaterialRequestResponse(
+                id=r.id,
+                organization_id=r.organization_id,
+                work_order_id=r.work_order_id,
+                work_order_number=r.work_order.work_order_number if r.work_order else None,
+                product_id=r.product_id,
+                product_sku=r.product.sku if r.product else None,
+                product_name=r.product.name if r.product else None,
+                requested_by_user_id=r.requested_by_user_id,
+                requested_by_name=r.requester.full_name or r.requester.email if r.requester else None,
+                quantity=r.quantity,
+                unit_of_measure=r.unit_of_measure,
+                status=r.status,
+                reason=r.reason,
+                notes=r.notes,
+                created_at=r.created_at,
+                updated_at=r.updated_at,
+            )
+            for r in reqs
+        ]
+
+    async def get_employee_activity(self, skip: int = 0, limit: int = 50) -> List[StockTransactionResponse]:
+        """Fetch transactions executed by the authenticated operator."""
+        res = await self.db.execute(
+            select(StockTransaction)
+            .options(
+                selectinload(StockTransaction.product),
+                selectinload(StockTransaction.warehouse),
+                selectinload(StockTransaction.work_order),
+                selectinload(StockTransaction.performed_by_user),
+            )
+            .where(
+                StockTransaction.organization_id == self.organization_id,
+                StockTransaction.performed_by_user_id == self.user_id,
+            )
+            .order_by(StockTransaction.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        txs = res.scalars().all()
+        return [
+            StockTransactionResponse(
+                id=tx.id,
+                organization_id=tx.organization_id,
+                inventory_id=tx.inventory_id,
+                product_id=tx.product_id,
+                product_sku=tx.product.sku if tx.product else None,
+                product_name=tx.product.name if tx.product else None,
+                warehouse_id=tx.warehouse_id,
+                warehouse_code=tx.warehouse.code if tx.warehouse else None,
+                work_order_id=tx.work_order_id,
+                production_order_id=tx.production_order_id,
+                employee_id=tx.employee_id,
+                employee_name=tx.performed_by_user.full_name if tx.performed_by_user else None,
+                performed_by_user_id=tx.performed_by_user_id,
+                performed_by_name=tx.performed_by_user.full_name if tx.performed_by_user else "User",
+                transaction_type=tx.transaction_type,
+                quantity=tx.quantity,
+                unit_of_measure=tx.unit_of_measure,
+                reason=tx.reason,
+                source_location=tx.source_location,
+                destination_location=tx.destination_location,
+                reference_type=tx.reference_type,
+                reference_id=tx.reference_id,
+                notes=tx.notes,
+                created_at=tx.created_at,
+            )
+            for tx in txs
+        ]
+
+    async def get_employee_dashboard_stats(self) -> EmployeeDashboardStats:
+        """Compute operational summary stats for the current operator."""
+        wo_res = await self.db.execute(
+            select(WorkOrder)
+            .options(selectinload(WorkOrder.material_requirements))
+            .where(
+                WorkOrder.organization_id == self.organization_id,
+                WorkOrder.assigned_user_id == self.user_id,
+            )
+        )
+        wos = wo_res.scalars().all()
+        active_wos = [w for w in wos if w.status not in (WorkOrderStatus.COMPLETED, WorkOrderStatus.CANCELLED)]
+
+        holding_count = 0
+        for w in wos:
+            for req in w.material_requirements:
+                if req.remaining_issued_holding > 0:
+                    holding_count += 1
+
+        now_utc = datetime.now(timezone.utc)
+        today_start = datetime(now_utc.year, now_utc.month, now_utc.day, tzinfo=timezone.utc)
+
+        tx_res = await self.db.execute(
+            select(StockTransaction).where(
+                StockTransaction.organization_id == self.organization_id,
+                StockTransaction.performed_by_user_id == self.user_id,
+                StockTransaction.created_at >= today_start,
+            )
+        )
+        today_txs = tx_res.scalars().all()
+
+        consumed_sum = sum(t.quantity for t in today_txs if t.transaction_type == TransactionType.CONSUMPTION)
+        returned_sum = sum(t.quantity for t in today_txs if t.transaction_type == TransactionType.RETURN)
+        wastage_sum = sum(t.quantity for t in today_txs if t.transaction_type in (TransactionType.WASTAGE, TransactionType.DAMAGE, TransactionType.EXPIRY))
+
+        return EmployeeDashboardStats(
+            active_work_orders=len(active_wos),
+            materials_in_holding=holding_count,
+            today_consumed_qty=round(consumed_sum, 2),
+            today_returned_qty=round(returned_sum, 2),
+            today_wastage_qty=round(wastage_sum, 2),
+            unit="kg / units",
+        )

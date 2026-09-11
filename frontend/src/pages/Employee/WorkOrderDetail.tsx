@@ -1,0 +1,693 @@
+import React, { useEffect, useState } from 'react';
+import {
+  Card,
+  Row,
+  Col,
+  Table,
+  Tag,
+  Button,
+  Space,
+  Typography,
+  Descriptions,
+  Modal,
+  Form,
+  InputNumber,
+  Input,
+  message,
+  Alert,
+  Spin,
+  Tooltip,
+} from 'antd';
+import {
+  ArrowLeftOutlined,
+  ThunderboltOutlined,
+  RollbackOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  CheckCircleOutlined,
+  ExclamationCircleOutlined,
+} from '@ant-design/icons';
+import { useParams, useNavigate } from 'react-router-dom';
+import controlTowerApi, {
+  WorkOrderDetailItem,
+  MaterialRequirementItem,
+  DataProvenance,
+} from '../../services/controlTowerApi';
+import ProvenanceBadge from '../../components/common/ProvenanceBadge';
+import EmptyState from '../../components/common/EmptyState';
+import ErrorState from '../../components/common/ErrorState';
+
+const { Title, Text, Paragraph } = Typography;
+
+export const WorkOrderDetail: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [provenance, setProvenance] = useState<DataProvenance>('LIVE');
+  const [workOrder, setWorkOrder] = useState<WorkOrderDetailItem | null>(null);
+  const [materials, setMaterials] = useState<MaterialRequirementItem[]>([]);
+
+  // Modal States
+  const [consumeModalVisible, setConsumeModalVisible] = useState<boolean>(false);
+  const [returnModalVisible, setReturnModalVisible] = useState<boolean>(false);
+  const [wasteModalVisible, setWasteModalVisible] = useState<boolean>(false);
+  const [requestModalVisible, setRequestModalVisible] = useState<boolean>(false);
+  const [selectedMaterial, setSelectedMaterial] = useState<MaterialRequirementItem | null>(null);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+
+  const [form] = Form.useForm();
+
+  const loadData = async () => {
+    if (!id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [woRes, matRes] = await Promise.all([
+        controlTowerApi.getWorkOrderDetail(id),
+        controlTowerApi.getWorkOrderMaterials(id),
+      ]);
+
+      if (!woRes.data) {
+        throw new Error('Work order not found or access forbidden.');
+      }
+      setWorkOrder(woRes.data);
+      setMaterials(matRes.data || []);
+      setProvenance(woRes.provenance);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load work order detail.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [id]);
+
+  // Open modals
+  const handleOpenConsume = (record: MaterialRequirementItem) => {
+    setSelectedMaterial(record);
+    form.resetFields();
+    form.setFieldsValue({
+      quantity: record.remaining_issued_holding > 0 ? Math.min(1.0, record.remaining_issued_holding) : 0,
+      reason: 'Production assembly',
+    });
+    setConsumeModalVisible(true);
+  };
+
+  const handleOpenReturn = (record: MaterialRequirementItem) => {
+    setSelectedMaterial(record);
+    form.resetFields();
+    form.setFieldsValue({
+      quantity: record.remaining_issued_holding > 0 ? Math.min(1.0, record.remaining_issued_holding) : 0,
+      reason: 'Surplus material returned to store',
+    });
+    setReturnModalVisible(true);
+  };
+
+  const handleOpenWaste = (record: MaterialRequirementItem) => {
+    setSelectedMaterial(record);
+    form.resetFields();
+    form.setFieldsValue({
+      quantity: record.remaining_issued_holding > 0 ? Math.min(1.0, record.remaining_issued_holding) : 0,
+      reason: '',
+    });
+    setWasteModalVisible(true);
+  };
+
+  const handleOpenRequest = (record?: MaterialRequirementItem) => {
+    setSelectedMaterial(record || null);
+    form.resetFields();
+    form.setFieldsValue({
+      quantity: 10.0,
+      unit_of_measure: record?.unit_of_measure || 'kg',
+      reason: 'Line replenishment for assembly run',
+    });
+    setRequestModalVisible(true);
+  };
+
+  // Submit Consume
+  const handleSubmitConsume = async () => {
+    if (!workOrder || !selectedMaterial) return;
+    try {
+      const values = await form.validateFields();
+      setSubmitting(true);
+      const idempotencyKey = `consume_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      await controlTowerApi.consumeMaterial({
+        work_order_id: workOrder.id,
+        product_id: selectedMaterial.product_id,
+        quantity: values.quantity,
+        unit_of_measure: selectedMaterial.unit_of_measure,
+        reason: values.reason,
+        notes: values.notes,
+        idempotency_key: idempotencyKey,
+      });
+
+      message.success(`${values.quantity} ${selectedMaterial.unit_of_measure} recorded as consumed.`);
+      setConsumeModalVisible(false);
+      await loadData();
+    } catch (err: any) {
+      message.error(err?.response?.data?.message || err?.message || 'Failed to consume material.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Submit Return
+  const handleSubmitReturn = async () => {
+    if (!workOrder || !selectedMaterial) return;
+    try {
+      const values = await form.validateFields();
+      setSubmitting(true);
+      const idempotencyKey = `return_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      await controlTowerApi.returnMaterial({
+        work_order_id: workOrder.id,
+        product_id: selectedMaterial.product_id,
+        quantity: values.quantity,
+        unit_of_measure: selectedMaterial.unit_of_measure,
+        reason: values.reason,
+        notes: values.notes,
+        idempotency_key: idempotencyKey,
+      });
+
+      message.success(`${values.quantity} ${selectedMaterial.unit_of_measure} returned to warehouse.`);
+      setReturnModalVisible(false);
+      await loadData();
+    } catch (err: any) {
+      message.error(err?.response?.data?.message || err?.message || 'Failed to return material.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Submit Wastage
+  const handleSubmitWaste = async () => {
+    if (!workOrder || !selectedMaterial) return;
+    try {
+      const values = await form.validateFields();
+      setSubmitting(true);
+      const idempotencyKey = `waste_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      await controlTowerApi.reportWastage({
+        work_order_id: workOrder.id,
+        product_id: selectedMaterial.product_id,
+        quantity: values.quantity,
+        unit_of_measure: selectedMaterial.unit_of_measure,
+        reason: values.reason,
+        notes: values.notes,
+        idempotency_key: idempotencyKey,
+      });
+
+      message.success(`${values.quantity} ${selectedMaterial.unit_of_measure} scrap logged.`);
+      setWasteModalVisible(false);
+      await loadData();
+    } catch (err: any) {
+      message.error(err?.response?.data?.message || err?.message || 'Failed to report scrap.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // Submit Request
+  const handleSubmitRequest = async () => {
+    if (!workOrder) return;
+    try {
+      const values = await form.validateFields();
+      setSubmitting(true);
+      await controlTowerApi.createMaterialRequest({
+        work_order_id: workOrder.id,
+        product_id: selectedMaterial ? selectedMaterial.product_id : values.product_id,
+        quantity: values.quantity,
+        unit_of_measure: values.unit_of_measure || 'kg',
+        reason: values.reason,
+        notes: values.notes,
+      });
+
+      message.success(`Requisition submitted for ${values.quantity} ${values.unit_of_measure}.`);
+      setRequestModalVisible(false);
+      await loadData();
+    } catch (err: any) {
+      message.error(err?.response?.data?.message || err?.message || 'Failed to submit request.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const columns = [
+    {
+      title: 'Material / Component',
+      key: 'product',
+      render: (_: any, r: MaterialRequirementItem) => (
+        <Space direction="vertical" size={0}>
+          <Text strong style={{ fontSize: 14 }}>{r.product_name || r.product_sku}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            SKU: <Text code>{r.product_sku}</Text>
+          </Text>
+        </Space>
+      ),
+    },
+    {
+      title: 'Required',
+      dataIndex: 'required_quantity',
+      key: 'required_quantity',
+      render: (qty: number, r: MaterialRequirementItem) => (
+        <Text>{qty} {r.unit_of_measure}</Text>
+      ),
+    },
+    {
+      title: 'Issued (Store -> Floor)',
+      dataIndex: 'issued_quantity',
+      key: 'issued_quantity',
+      render: (qty: number, r: MaterialRequirementItem) => (
+        <Text strong style={{ color: qty > 0 ? '#1E40AF' : '#94A3B8' }}>
+          {qty} {r.unit_of_measure}
+        </Text>
+      ),
+    },
+    {
+      title: 'Consumed',
+      dataIndex: 'consumed_quantity',
+      key: 'consumed_quantity',
+      render: (qty: number, r: MaterialRequirementItem) => (
+        <Text style={{ color: '#059669' }}>{qty} {r.unit_of_measure}</Text>
+      ),
+    },
+    {
+      title: 'Returned',
+      dataIndex: 'returned_quantity',
+      key: 'returned_quantity',
+      render: (qty: number, r: MaterialRequirementItem) => (
+        <Text style={{ color: '#D97706' }}>{qty} {r.unit_of_measure}</Text>
+      ),
+    },
+    {
+      title: 'Scrap / Loss',
+      dataIndex: 'wastage_quantity',
+      key: 'wastage_quantity',
+      render: (qty: number, r: MaterialRequirementItem) => (
+        <Text style={{ color: '#DC2626' }}>{qty} {r.unit_of_measure}</Text>
+      ),
+    },
+    {
+      title: 'Holding Available to Use',
+      key: 'holding',
+      render: (_: any, r: MaterialRequirementItem) => {
+        const h = r.remaining_issued_holding;
+        return (
+          <Tag
+            color={h > 0 ? 'cyan' : 'default'}
+            style={{ fontSize: 13, padding: '4px 8px', fontWeight: 700 }}
+          >
+            {h} {r.unit_of_measure}
+          </Tag>
+        );
+      },
+    },
+    {
+      title: 'Floor Actions',
+      key: 'actions',
+      render: (_: any, r: MaterialRequirementItem) => {
+        const canAct = r.remaining_issued_holding > 0;
+        return (
+          <Space wrap>
+            <Button
+              type="primary"
+              size="small"
+              icon={<ThunderboltOutlined />}
+              disabled={!canAct}
+              onClick={() => handleOpenConsume(r)}
+              style={{ background: canAct ? '#059669' : undefined, borderColor: canAct ? '#059669' : undefined }}
+            >
+              Use
+            </Button>
+            <Button
+              size="small"
+              icon={<RollbackOutlined />}
+              disabled={!canAct}
+              onClick={() => handleOpenReturn(r)}
+            >
+              Return
+            </Button>
+            <Button
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              disabled={!canAct}
+              onClick={() => handleOpenWaste(r)}
+            >
+              Waste
+            </Button>
+            <Button
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => handleOpenRequest(r)}
+            >
+              Request
+            </Button>
+          </Space>
+        );
+      },
+    },
+  ];
+
+  if (loading && !workOrder) {
+    return (
+      <div style={{ textAlign: 'center', padding: '100px 0' }}>
+        <Spin size="large" tip="Loading work order details..." />
+      </div>
+    );
+  }
+
+  if (error && !workOrder) {
+    return (
+      <ErrorState
+        title="Unable to open work order"
+        message={error}
+        onRetry={loadData}
+      />
+    );
+  }
+
+  if (!workOrder) return null;
+
+  return (
+    <div style={{ padding: '24px', maxWidth: 1400, margin: '0 auto' }}>
+      {/* Top Bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/employee/work-orders')}>
+            Back to Orders
+          </Button>
+          <Title level={3} style={{ margin: 0 }}>
+            {workOrder.work_order_number}
+          </Title>
+          <Tag color="processing" style={{ fontSize: 13, padding: '2px 8px' }}>
+            {workOrder.status}
+          </Tag>
+        </Space>
+        <Space>
+          <ProvenanceBadge provenance={provenance} sourceNote="Authoritative Work Order Detail" />
+          <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>
+            Refresh
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => handleOpenRequest()}
+            style={{ borderRadius: 6 }}
+          >
+            Request Extra Material
+          </Button>
+        </Space>
+      </div>
+
+      {/* Info Card */}
+      <Card bordered style={{ borderRadius: 8, marginBottom: 24 }}>
+        <Descriptions column={{ xs: 1, sm: 2, md: 4 }} bordered size="middle">
+          <Descriptions.Item label="Target Assembly">
+            <Text strong>{workOrder.product_name || workOrder.product_sku || 'Assembly'}</Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Production Order">
+            <Text code>{workOrder.production_order_number || 'Discrete Job'}</Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Production Area">
+            <Tag color="blue">{workOrder.production_area || 'Main Plant'}</Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="Assigned Operator">
+            <Text strong>{workOrder.assigned_user_name || 'Assigned Operator'}</Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Planned Quantity">
+            <Text strong>{workOrder.planned_quantity} units</Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Completed Quantity">
+            <Text>{workOrder.completed_quantity} units</Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Source Warehouse">
+            <Text>{workOrder.warehouse_code || 'Central Store'}</Text>
+          </Descriptions.Item>
+          <Descriptions.Item label="Created At">
+            <Text type="secondary">{new Date(workOrder.created_at).toLocaleDateString()}</Text>
+          </Descriptions.Item>
+        </Descriptions>
+      </Card>
+
+      {/* Materials Table */}
+      <Card
+        title={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Space>
+              <Text strong style={{ fontSize: 16 }}>Bill of Materials & Floor Holding</Text>
+              <Tag color="geekblue">{materials.length} Materials</Tag>
+            </Space>
+            <Text type="secondary" style={{ fontSize: 13 }}>
+              Invariance: <Text code>Issued = Consumed + Returned + Wastage + Holding</Text>
+            </Text>
+          </div>
+        }
+        bordered
+        style={{ borderRadius: 8 }}
+      >
+        {materials.length === 0 ? (
+          <EmptyState
+            title="No Material Requirements"
+            description="No materials have been defined for this work order yet. Click 'Request Extra Material' to submit a requisition."
+          />
+        ) : (
+          <Table
+            dataSource={materials}
+            columns={columns}
+            rowKey="id"
+            pagination={false}
+          />
+        )}
+      </Card>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* CONSUME MODAL */}
+      {/* ---------------------------------------------------------------------- */}
+      <Modal
+        title={
+          <Space>
+            <ThunderboltOutlined style={{ color: '#059669' }} />
+            <span>Record Material Consumption</span>
+          </Space>
+        }
+        open={consumeModalVisible}
+        onCancel={() => setConsumeModalVisible(false)}
+        onOk={handleSubmitConsume}
+        confirmLoading={submitting}
+        okText="Confirm Consumption"
+        okButtonProps={{ style: { background: '#059669', borderColor: '#059669' } }}
+      >
+        <Paragraph type="secondary">
+          Deducts material from your work order holding. Central warehouse inventory is not altered.
+        </Paragraph>
+        <Alert
+          type="info"
+          message={`Available Holding: ${selectedMaterial?.remaining_issued_holding} ${selectedMaterial?.unit_of_measure}`}
+          style={{ marginBottom: 16 }}
+        />
+        <Form form={form} layout="vertical">
+          <Form.Item
+            name="quantity"
+            label={`Quantity to Consume (${selectedMaterial?.unit_of_measure})`}
+            rules={[
+              { required: true, message: 'Please enter quantity' },
+              {
+                type: 'number',
+                min: 0.001,
+                max: selectedMaterial?.remaining_issued_holding,
+                message: `Must be between 0.001 and ${selectedMaterial?.remaining_issued_holding}`,
+              },
+            ]}
+          >
+            <InputNumber style={{ width: '100%' }} step={0.1} precision={2} />
+          </Form.Item>
+          <Form.Item
+            name="reason"
+            label="Usage Rationale / Operation"
+            rules={[{ required: true, message: 'Please specify usage note' }]}
+          >
+            <Input placeholder="e.g. Frame fabrication and welding" />
+          </Form.Item>
+          <Form.Item name="notes" label="Additional Floor Notes (Optional)">
+            <Input.TextArea rows={2} placeholder="Optional notes" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* RETURN MODAL */}
+      {/* ---------------------------------------------------------------------- */}
+      <Modal
+        title={
+          <Space>
+            <RollbackOutlined style={{ color: '#D97706' }} />
+            <span>Return Surplus Material to Store</span>
+          </Space>
+        }
+        open={returnModalVisible}
+        onCancel={() => setReturnModalVisible(false)}
+        onOk={handleSubmitReturn}
+        confirmLoading={submitting}
+        okText="Confirm Return"
+      >
+        <Paragraph type="secondary">
+          Returns unused material back to central store shelving. Central warehouse inventory will increment.
+        </Paragraph>
+        <Alert
+          type="warning"
+          message={`Holding with you: ${selectedMaterial?.remaining_issued_holding} ${selectedMaterial?.unit_of_measure}`}
+          style={{ marginBottom: 16 }}
+        />
+        <Form form={form} layout="vertical">
+          <Form.Item
+            name="quantity"
+            label={`Quantity to Return (${selectedMaterial?.unit_of_measure})`}
+            rules={[
+              { required: true, message: 'Please enter quantity' },
+              {
+                type: 'number',
+                min: 0.001,
+                max: selectedMaterial?.remaining_issued_holding,
+                message: `Cannot exceed holding balance of ${selectedMaterial?.remaining_issued_holding}`,
+              },
+            ]}
+          >
+            <InputNumber style={{ width: '100%' }} step={0.1} precision={2} />
+          </Form.Item>
+          <Form.Item
+            name="reason"
+            label="Return Reason"
+            rules={[{ required: true, message: 'Please provide return reason' }]}
+          >
+            <Input placeholder="e.g. Surplus material returned at end of shift" />
+          </Form.Item>
+          <Form.Item name="notes" label="Additional Notes (Optional)">
+            <Input.TextArea rows={2} placeholder="Optional notes" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* WASTAGE MODAL */}
+      {/* ---------------------------------------------------------------------- */}
+      <Modal
+        title={
+          <Space>
+            <DeleteOutlined style={{ color: '#DC2626' }} />
+            <span>Report Scrap / Process Wastage</span>
+          </Space>
+        }
+        open={wasteModalVisible}
+        onCancel={() => setWasteModalVisible(false)}
+        onOk={handleSubmitWaste}
+        confirmLoading={submitting}
+        okText="Report Scrap"
+        okButtonProps={{ danger: true }}
+      >
+        <Paragraph type="secondary">
+          Logs trimmings, kerf loss, or damaged components. Requires mandatory compliance reason.
+        </Paragraph>
+        <Alert
+          type="error"
+          message={`Available Holding: ${selectedMaterial?.remaining_issued_holding} ${selectedMaterial?.unit_of_measure}`}
+          style={{ marginBottom: 16 }}
+        />
+        <Form form={form} layout="vertical">
+          <Form.Item
+            name="quantity"
+            label={`Scrap Quantity (${selectedMaterial?.unit_of_measure})`}
+            rules={[
+              { required: true, message: 'Please enter scrap quantity' },
+              {
+                type: 'number',
+                min: 0.001,
+                max: selectedMaterial?.remaining_issued_holding,
+                message: `Cannot exceed holding of ${selectedMaterial?.remaining_issued_holding}`,
+              },
+            ]}
+          >
+            <InputNumber style={{ width: '100%' }} step={0.1} precision={2} />
+          </Form.Item>
+          <Form.Item
+            name="reason"
+            label="Mandatory Reason for Scrap"
+            rules={[{ required: true, message: 'Reason is required for scrap logging' }]}
+          >
+            <Input placeholder="e.g. Contaminated during milling; Trimming residue" />
+          </Form.Item>
+          <Form.Item name="notes" label="Additional Notes (Optional)">
+            <Input.TextArea rows={2} placeholder="Optional details" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* ---------------------------------------------------------------------- */}
+      {/* REQUEST MODAL */}
+      {/* ---------------------------------------------------------------------- */}
+      <Modal
+        title={
+          <Space>
+            <PlusOutlined style={{ color: '#1E40AF' }} />
+            <span>Request Additional Material</span>
+          </Space>
+        }
+        open={requestModalVisible}
+        onCancel={() => setRequestModalVisible(false)}
+        onOk={handleSubmitRequest}
+        confirmLoading={submitting}
+        okText="Submit Requisition"
+      >
+        <Paragraph type="secondary">
+          Submits a formal requisition to the store room. The store will inspect and issue stock.
+        </Paragraph>
+        <Form form={form} layout="vertical">
+          {selectedMaterial ? (
+            <Alert
+              type="info"
+              message={`Requisition for: ${selectedMaterial.product_name || selectedMaterial.product_sku}`}
+              style={{ marginBottom: 16 }}
+            />
+          ) : (
+            <Form.Item
+              name="product_id"
+              label="Material SKU or Identifier"
+              rules={[{ required: true, message: 'Please enter material SKU' }]}
+            >
+              <Input placeholder="e.g. RM-STEEL-SHEET" />
+            </Form.Item>
+          )}
+
+          <Form.Item
+            name="quantity"
+            label="Requested Quantity"
+            rules={[{ required: true, message: 'Please enter quantity' }, { type: 'number', min: 0.01 }]}
+          >
+            <InputNumber style={{ width: '100%' }} step={1} precision={2} />
+          </Form.Item>
+
+          <Form.Item name="unit_of_measure" label="Unit of Measure">
+            <Input disabled={!!selectedMaterial} placeholder="e.g. kg, piece, meter" />
+          </Form.Item>
+
+          <Form.Item
+            name="reason"
+            label="Requisition Rationale"
+            rules={[{ required: true, message: 'Please specify reason for request' }]}
+          >
+            <Input placeholder="e.g. High demand line run; replacement for damaged batch" />
+          </Form.Item>
+
+          <Form.Item name="notes" label="Shift Notes (Optional)">
+            <Input.TextArea rows={2} placeholder="Optional note for storekeeper" />
+          </Form.Item>
+        </Form>
+      </Modal>
+    </div>
+  );
+};
+
+export default WorkOrderDetail;

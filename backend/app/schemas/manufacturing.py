@@ -201,3 +201,99 @@ class TraceabilityTimelineResponse(BaseModel):
     unit_of_measure: str
     current_stock_total: float
     timeline: List[TraceabilityTimelineEntry]
+
+
+# ------------------------------------------------------------------------------
+# Material Request Schemas (Phase 13.2)
+# ------------------------------------------------------------------------------
+
+class MaterialRequestCreate(BaseModel):
+    work_order_id: str = Field(..., json_schema_extra={"example": "wo-uuid-001"})
+    product_id: str = Field(..., json_schema_extra={"example": "prod-uuid-001"})
+    quantity: float = Field(..., gt=0.0, description="Requested quantity (strictly positive)")
+    unit_of_measure: Optional[str] = "kg"
+    reason: str = Field(..., min_length=1, max_length=255, json_schema_extra={"example": "Line replenishment"})
+    notes: Optional[str] = None
+
+
+class MaterialRequestResponse(BaseModel):
+    id: str
+    organization_id: str
+    work_order_id: str
+    work_order_number: Optional[str] = None
+    product_id: str
+    product_sku: Optional[str] = None
+    product_name: Optional[str] = None
+    requested_by_user_id: str
+    requested_by_name: Optional[str] = None
+    quantity: float
+    unit_of_measure: Optional[str] = None
+    status: str
+    reason: str
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MaterialRequestUpdate(BaseModel):
+    status: str = Field(..., description="Target status: APPROVED, REJECTED, or FULFILLED")
+    notes: Optional[str] = None
+
+
+# ------------------------------------------------------------------------------
+# Employee Operation Request Payloads (Phase 13.2)
+# ------------------------------------------------------------------------------
+
+class ConsumeMaterialRequest(BaseModel):
+    work_order_id: str
+    product_id: str
+    quantity: float = Field(..., gt=0.0)
+    unit_of_measure: Optional[str] = "kg"
+    reason: Optional[str] = "Production assembly"
+    notes: Optional[str] = None
+    idempotency_key: Optional[str] = None
+
+
+class ReturnMaterialRequest(BaseModel):
+    work_order_id: str
+    product_id: str
+    quantity: float = Field(..., gt=0.0)
+    unit_of_measure: Optional[str] = "kg"
+    reason: Optional[str] = "Surplus material returned"
+    notes: Optional[str] = None
+    idempotency_key: Optional[str] = None
+
+
+class WastageMaterialRequest(BaseModel):
+    work_order_id: str
+    product_id: str
+    quantity: float = Field(..., gt=0.0)
+    unit_of_measure: Optional[str] = "kg"
+    reason: str = Field(..., min_length=2, description="Mandatory scrap/wastage rationale")
+    notes: Optional[str] = None
+    idempotency_key: Optional[str] = None
+
+
+# ------------------------------------------------------------------------------
+# Work Order Detail & Dashboard Stats (Phase 13.2)
+# ------------------------------------------------------------------------------
+
+class WorkOrderDetailResponse(WorkOrderResponse):
+    product_id: Optional[str] = None
+    product_sku: Optional[str] = None
+    product_name: Optional[str] = None
+    production_order_number: Optional[str] = None
+    assigned_user_name: Optional[str] = None
+    warehouse_code: Optional[str] = None
+    materials: List[MaterialRequirementResponse] = []
+
+
+class EmployeeDashboardStats(BaseModel):
+    active_work_orders: int = 0
+    materials_in_holding: int = 0
+    today_consumed_qty: float = 0.0
+    today_returned_qty: float = 0.0
+    today_wastage_qty: float = 0.0
+    unit: str = "kg / units"

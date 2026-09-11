@@ -19,6 +19,7 @@ from backend.app.models.audit_log import AuditLog
 from backend.app.models.production_order import ProductionOrder
 from backend.app.models.work_order import WorkOrder
 from backend.app.models.material_requirement import MaterialRequirement
+from backend.app.models.material_request import MaterialRequest
 from backend.app.models.stock_transaction import StockTransaction
 
 __all__ = [
@@ -44,5 +45,6 @@ __all__ = [
     "ProductionOrder",
     "WorkOrder",
     "MaterialRequirement",
+    "MaterialRequest",
     "StockTransaction",
 ]
