@@ -26,6 +26,14 @@ def test_liveness_endpoint(client: TestClient):
     assert data["status"] == "alive"
 
 
+def test_health_live_endpoint(client: TestClient):
+    """Verify /health/live Render and container liveness probe alias returns 200."""
+    response = client.get("/health/live")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "alive"
+
+
 def test_readiness_endpoint(client: TestClient):
     """Verify /ready Kubernetes readiness probe returns 200 with dependency checks."""
     response = client.get("/ready")

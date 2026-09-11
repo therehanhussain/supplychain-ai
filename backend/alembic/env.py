@@ -28,10 +28,14 @@ target_metadata = Base.metadata
 def get_sync_url() -> str:
     """Retrieve database URL and convert async driver to sync for migrations."""
     db_url = os.environ.get("DATABASE_URL") or settings.DATABASE_URL
+    if db_url.startswith("postgres://"):
+        return db_url.replace("postgres://", "postgresql+psycopg://", 1)
     if db_url.startswith("postgresql+asyncpg://"):
         return db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
     if db_url.startswith("sqlite+aiosqlite://"):
         return db_url.replace("sqlite+aiosqlite://", "sqlite://", 1)
+    if db_url.startswith("postgresql://") and not db_url.startswith("postgresql+"):
+        return db_url.replace("postgresql://", "postgresql+psycopg://", 1)
     return db_url
 
 

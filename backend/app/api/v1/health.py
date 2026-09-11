@@ -27,8 +27,9 @@ async def get_health():
 
 
 @router.get("/live", response_model=LiveStatus, summary="Liveness Probe")
+@router.get("/health/live", response_model=LiveStatus, summary="Liveness Probe Alias")
 async def get_liveness():
-    """Kubernetes liveness probe indicating process is responsive."""
+    """Kubernetes and Render liveness probe indicating process is responsive."""
     return LiveStatus(status="alive")
 
 

@@ -50,6 +50,18 @@ class Settings(BaseSettings):
         description="SQLAlchemy async connection string",
     )
 
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def assemble_database_url(cls, v: str) -> str:
+        if not v:
+            return v
+        # Normalize Render/cloud providers supplying postgres:// or postgresql:// to asyncpg
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgresql://") and not v.startswith("postgresql+"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
     # Redis Cache & Queue
     REDIS_URL: str = Field(
         default="redis://localhost:6379/0",

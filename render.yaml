@@ -1,0 +1,143 @@
+# ==============================================================================
+# Render Blueprint — SupplyChainAgent Cloud Infrastructure Specification
+#
+# SERVICES DEFINED:
+# 1. supplychain-postgres : Managed PostgreSQL 16 (Free tier - 30-day lifecycle)
+# 2. supplychain-redis    : Managed Key Value store (Redis 7-compatible, Free tier)
+# 3. supplychain-backend  : FastAPI Web Service (Free tier, auto TLS, dynamic $PORT)
+# 4. Celery Worker        : Evaluated & documented (Requires paid Starter plan)
+#
+# SECURITY GUARANTEES:
+# - Databases are private (ipAllowList: []) — never exposed to the public internet.
+# - JWT_SECRET is automatically generated via Render cryptographically secure vault.
+# - CORS is strictly restricted to https://frontend-pi-hazel-83.vercel.app.
+# - LLM_MODE defaults to 'mock' for zero external API costs and zero credentials.
+# ==============================================================================
+
+databases:
+  - name: supplychain-postgres
+    databaseName: supplychain
+    user: supplychain
+    plan: free
+    ipAllowList: [] # Private network only — blocked from public internet
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. FastAPI Web Application Service
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: supplychain-backend
+    runtime: python
+    plan: free
+    region: oregon # or frankfurt, ohio, singapore
+    buildCommand: pip install -r requirements.txt
+    # On Free plan, preDeployCommand is unavailable. Migrations run idempotently
+    # before uvicorn launches on the dynamic Render-assigned $PORT.
+    startCommand: alembic -c backend/alembic.ini upgrade head && uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health/live
+    autoDeploy: true
+    envVars:
+      # Application Environment
+      - key: ENVIRONMENT
+        value: production
+      - key: DEBUG
+        value: "false"
+      - key: LOG_LEVEL
+        value: INFO
+
+      # Security & Ingress
+      - key: CORS_ORIGINS
+        value: https://frontend-pi-hazel-83.vercel.app
+      - key: JWT_SECRET
+        generateValue: true # Render automatically generates a 256-bit secure secret
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "60"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "7"
+
+      # Rate Limiting
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      - key: RATE_LIMIT_UNAUTHENTICATED
+        value: "30"
+      - key: RATE_LIMIT_AUTHENTICATED
+        value: "120"
+      - key: RATE_LIMIT_SIMULATION
+        value: "10"
+
+      # Relational Persistence (Render PostgreSQL)
+      - key: DATABASE_URL
+        fromDatabase:
+          name: supplychain-postgres
+          property: connectionString
+
+      # Cache & Async Broker (Render Key Value)
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: supplychain-redis
+          property: connectionString
+
+      # LLM Gateway (Safe Mock Mode Default)
+      - key: LLM_MODE
+        value: mock
+      - key: DEFAULT_LLM_MODEL
+        value: gpt-4o-mini
+      - key: OPENAI_API_KEY
+        sync: false # Set manually in dashboard if LLM_MODE=live
+      - key: DEEPSEEK_API_KEY
+        sync: false # Set manually in dashboard if LLM_MODE=live
+
+      # Graph Database (Safe Fallback Default)
+      # Leave unconfigured to use verified offline dataset (neo4j/industry_test.json)
+      # Or configure for external Neo4j AuraDB Free instance:
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USERNAME
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: NEO4J_DATABASE
+        value: neo4j
+
+  # ----------------------------------------------------------------------------
+  # 2. Redis-Compatible Key Value Service
+  # ----------------------------------------------------------------------------
+  - type: keyvalue
+    name: supplychain-redis
+    plan: free
+    region: oregon
+    ipAllowList: [] # Private network only — internal connections only
+
+  # ----------------------------------------------------------------------------
+  # 3. Celery Background Worker (Optional / Paid Evaluation)
+  # NOTE: Render Background Workers (type: worker) require the 'starter' plan
+  # ($7/month) as Render does not provide a free worker tier.
+  # For free deployments, FastAPI handles async simulations in-process via asyncio.
+  # To enable a dedicated Celery worker, uncomment the block below:
+  # ----------------------------------------------------------------------------
+  # - type: worker
+  #   name: supplychain-celery-worker
+  #   runtime: python
+  #   plan: starter
+  #   region: oregon
+  #   buildCommand: pip install -r requirements.txt
+  #   startCommand: celery -A backend.app.workers.celery_app.celery_app worker --loglevel=INFO --concurrency=2
+  #   envVars:
+  #     - key: ENVIRONMENT
+  #       value: production
+  #     - key: DATABASE_URL
+  #       fromDatabase:
+  #         name: supplychain-postgres
+  #         property: connectionString
+  #     - key: REDIS_URL
+  #       fromService:
+  #         type: keyvalue
+  #         name: supplychain-redis
+  #         property: connectionString
+  #     - key: LLM_MODE
+  #       value: mock
+  #     - key: CELERY_WORKER_CONCURRENCY
+  #       value: "2"

@@ -46,3 +46,15 @@ def test_production_jwt_secret_valid_key_accepted():
     )
     assert s.ENVIRONMENT == "production"
     assert s.JWT_SECRET.startswith("a_very_strong")
+
+
+def test_database_url_normalization_for_render():
+    """Verify postgres:// and postgresql:// are normalized to postgresql+asyncpg://."""
+    s1 = Settings(DATABASE_URL="postgres://user:pass@ep-cool-db.render.com/mydb")
+    assert s1.DATABASE_URL == "postgresql+asyncpg://user:pass@ep-cool-db.render.com/mydb"
+
+    s2 = Settings(DATABASE_URL="postgresql://user:pass@ep-cool-db.render.com/mydb")
+    assert s2.DATABASE_URL == "postgresql+asyncpg://user:pass@ep-cool-db.render.com/mydb"
+
+    s3 = Settings(DATABASE_URL="postgresql+asyncpg://user:pass@host/db")
+    assert s3.DATABASE_URL == "postgresql+asyncpg://user:pass@host/db"
