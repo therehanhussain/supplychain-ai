@@ -7,6 +7,7 @@ backward-compatible /api/* legacy routes.
 from fastapi import APIRouter
 
 from backend.app.api.v1.health import router as health_router
+from backend.app.api.v1.auth import router as auth_router
 from backend.app.api.v1.suppliers import router as suppliers_router
 from backend.app.api.v1.inventory import router as inventory_router
 from backend.app.api.v1.orders import router as orders_router
@@ -21,6 +22,7 @@ from backend.app.api.legacy import router as legacy_router
 # Master v1 router prefixing /api/v1
 v1_router = APIRouter(prefix="/api/v1")
 v1_router.include_router(health_router)
+v1_router.include_router(auth_router)
 v1_router.include_router(suppliers_router)
 v1_router.include_router(inventory_router)
 v1_router.include_router(orders_router)

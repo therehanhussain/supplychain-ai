@@ -1,44 +1,68 @@
-"""Orders API Endpoints (/api/v1/orders)."""
-
-from typing import List
-from fastapi import APIRouter, status
-from backend.app.schemas.order import OrderResponse, OrderCreate, OrderItem
+"""Orders API Endpoints (/api/v1/orders) backed by PostgreSQL persistence."""
+from typing import List, Optional
+from fastapi import APIRouter, Depends, status, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from backend.app.core.database import get_db
+from backend.app.api.dependencies import get_tenant_context, TenantContext
+from backend.app.services.order_service import OrderService
+from backend.app.schemas.order import OrderResponse, OrderCreate
 
 router = APIRouter(prefix="/orders", tags=["Orders"])
 
-_ORDERS = [
-    OrderResponse(
-        id=f"ord_{i:03d}",
-        customer_name=f"Enterprise Client {i}",
-        supplier_id=f"sup_{1 + (i % 4):03d}",
-        items=[
-            OrderItem(product_id=f"prod_{i}", product_name=f"Assembly Module {i}", quantity=100.0, unit_price=45.0)
-        ],
-        total_amount=4500.0,
-        status="confirmed" if i % 2 == 0 else "pending",
+
+@router.get("", response_model=List[OrderResponse], summary="List purchase orders")
+async def list_orders(
+    status: Optional[str] = Query(None),
+    supplier_id: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    tenant: TenantContext = Depends(get_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve purchase and sales orders for current tenant."""
+    service = OrderService(db, tenant.organization_id)
+    return await service.list_orders(
+        status=status, supplier_id=supplier_id, skip=skip, limit=limit
     )
-    for i in range(1, 9)
-]
-
-
-@router.get("", response_model=List[OrderResponse], summary="List purchase & sales orders")
-async def list_orders():
-    return _ORDERS
 
 
 @router.get("/{order_id}", response_model=OrderResponse, summary="Get order details")
-async def get_order(order_id: str):
-    for o in _ORDERS:
-        if o.id == order_id:
-            return o
-    return _ORDERS[0]
+async def get_order(
+    order_id: str,
+    tenant: TenantContext = Depends(get_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve details for a specific order by ID."""
+    service = OrderService(db, tenant.organization_id)
+    return await service.get_order(order_id)
 
 
-@router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED, summary="Create order")
-async def create_order(payload: OrderCreate):
-    new_order = OrderResponse(
-        id=f"ord_{len(_ORDERS) + 1:03d}",
-        **payload.model_dump(),
-    )
-    _ORDERS.append(new_order)
-    return new_order
+@router.post(
+    "",
+    response_model=OrderResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create purchase order",
+)
+async def create_order(
+    payload: OrderCreate,
+    tenant: TenantContext = Depends(get_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Submit and store a new purchase order under current tenant."""
+    service = OrderService(db, tenant.organization_id)
+    return await service.create_order(payload)
+
+
+@router.delete(
+    "/{order_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete order",
+)
+async def delete_order(
+    order_id: str,
+    tenant: TenantContext = Depends(get_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete an order belonging to current tenant."""
+    service = OrderService(db, tenant.organization_id)
+    await service.delete_order(order_id)

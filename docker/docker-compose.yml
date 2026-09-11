@@ -1,52 +1,165 @@
+version: "3.8"
+
 services:
-  mlflow-svc:
-    # because Docker Desktop cannot attach folders in WSL2, we need to build the image locally
+  # ============================================================================
+  # Frontend Service (React / Vite compiled to static assets served by Nginx)
+  # ============================================================================
+  frontend:
+    build:
+      context: ..
+      dockerfile: infra/docker/frontend.Dockerfile
+    container_name: supplychain_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - supplychain_net
+
+  # ============================================================================
+  # Backend API Service (FastAPI / Uvicorn)
+  # ============================================================================
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/docker/backend.Dockerfile
+    container_name: supplychain_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - PORT=8000
+      - DATABASE_URL=postgresql+asyncpg://supplychain:SupplyChain2026!@postgres:5432/supplychain
+      - REDIS_URL=redis://:SupplyChainRedis2026@redis:6379/0
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USER=neo4j
+      - NEO4J_PASSWORD=SupplyChainNeo4j2026!
+      - JWT_SECRET_KEY=dev_insecure_jwt_secret_key_change_in_production_32char!
+      - JWT_ALGORITHM=HS256
+      - CORS_ORIGINS=http://localhost,http://localhost:3000,http://localhost:80
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - supplychain_net
+
+  # ============================================================================
+  # Primary Relational Database (PostgreSQL 16)
+  # ============================================================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: supplychain_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: supplychain
+      POSTGRES_PASSWORD: SupplyChain2026!
+      POSTGRES_DB: supplychain
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U supplychain -d supplychain"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - supplychain_net
+
+  # ============================================================================
+  # Graph Database (Neo4j 5 Community)
+  # ============================================================================
+  neo4j:
+    image: neo4j:5-community
+    container_name: supplychain_neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474" # HTTP Browser UI
+      - "7687:7687" # Bolt protocol
+    environment:
+      NEO4J_AUTH: neo4j/SupplyChainNeo4j2026!
+      NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - supplychain_net
+
+  # ============================================================================
+  # Distributed Cache & Message Broker (Redis 7)
+  # ============================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: supplychain_redis
+    command: redis-server --requirepass SupplyChainRedis2026
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    environment:
+      REDIS_PASSWORD: SupplyChainRedis2026
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "SupplyChainRedis2026", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - supplychain_net
+
+  # ============================================================================
+  # Experiment & Metric Tracking (MLflow)
+  # ============================================================================
+  mlflow:
     build:
       context: ./mlflow
       dockerfile: Dockerfile
       args:
         BASE_IMAGE: bitnamilegacy/mlflow:2.19.0
-    container_name: mlflow
-    restart: always
-    ports:
-      - 59000:59000
-    volumes:
-      - mlflow:/app
-    environment:
-      MLFLOW_AUTH_CONFIG_PATH: /mlflow/basic_auth.ini
-      POSTGRESQL_PASSWORD: SupplyChainDB2026
-    depends_on:
-      - postgresql-svc
-
-  postgresql-svc:
-    image: bitnami/postgresql:latest
-    container_name: postgresql
+    container_name: supplychain_mlflow
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "59000:59000"
     volumes:
-      - postgresql:/bitnami/postgresql
+      - mlflow_data:/app
     environment:
-      POSTGRESQL_PASSWORD: CHANGE_ME
-
-  redis-svc:
-    image: bitnami/redis:latest
-    container_name: redis 
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "SupplyChainRedis2026", "ping"]
-      interval: 5s
-      timeout: 30s
-      retries: 3
-    restart: always
-    environment:
-      REDIS_PASSWORD: SupplyChainRedis2026
-      REDIS_AOF_ENABLED: no
-    ports:
-      - 6379:6379 # TCP Listener for Redis
-      # - 26379:26379 # TCP Listener for Redis Sentinel
-      # - 6380:6380 # TCP Listener for Redis (Cluster)
-      
+      MLFLOW_AUTH_CONFIG_PATH: /mlflow/basic_auth.ini
+      POSTGRESQL_PASSWORD: SupplyChain2026!
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - supplychain_net
 
 volumes:
-  mlflow:
-  postgresql:
+  postgres_data:
+  redis_data:
+  neo4j_data:
+  mlflow_data:
+
+networks:
+  supplychain_net:
+    driver: bridge

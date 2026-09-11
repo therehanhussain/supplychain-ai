@@ -27,3 +27,6 @@ agentsociety-ui
 *.whl
 frontend/node_modules/
 venv/
+*.db
+*.sqlite
+*.sqlite3

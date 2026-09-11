@@ -1,50 +1,148 @@
-"""Centralized LLM Gateway Service.
+"""Centralized LLM Gateway Service with Decision Integrity Tracking.
 
-Provides a unified interface for agent and decision intelligence reasoning calls,
-handling secret masking, prompt telemetry, and model fallback.
+Enforces provider separation, explicit live vs. mock operational modes, provenance
+metadata (LIVE_MODEL, SIMULATED, FALLBACK), and prevents silent degradation to fake data.
 """
-
+import enum
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+import httpx
+
 from backend.app.core.config import settings
 from backend.app.core.logging import logger
+from backend.app.core.exceptions import AppException
+
+
+class LLMDecisionMode(str, enum.Enum):
+    LIVE_MODEL = "LIVE_MODEL"
+    SIMULATED = "SIMULATED"
+    FALLBACK = "FALLBACK"
+
+
+class LLMProvider(str, enum.Enum):
+    OPENAI = "openai"
+    DEEPSEEK = "deepseek"
+    MOCK = "mock"
+
+
+class PromptTemplate:
+    """Standardized prompt templates ensuring consistent system reasoning."""
+
+    @staticmethod
+    def demand_forecast(sku: str, history_days: int) -> str:
+        return f"Analyze inventory demand trend for SKU '{sku}' over past {history_days} days. Predict next 14-day demand."
+
+    @staticmethod
+    def disruption_risk(supplier_name: str, tier: int) -> str:
+        return f"Evaluate operational disruption risk and geopolitical vulnerabilities for Tier-{tier} vendor '{supplier_name}'."
 
 
 class LLMService:
-    """Centralized LLM client for enterprise agent interactions."""
+    """Enterprise LLM Gateway with provider routing, decision provenance, and integrity checks."""
 
     def __init__(self):
-        self.api_key = settings.OPENAI_API_KEY
-        self.base_url = settings.OPENAI_BASE_URL
+        self.mode = settings.LLM_MODE.lower().strip()
+        self.openai_key = settings.OPENAI_API_KEY
+        self.openai_base_url = settings.OPENAI_BASE_URL.rstrip("/")
+        self.deepseek_key = settings.DEEPSEEK_API_KEY
+        self.deepseek_base_url = settings.DEEPSEEK_BASE_URL.rstrip("/")
         self.default_model = settings.DEFAULT_LLM_MODEL
+
+    @property
+    def current_mode(self) -> str:
+        return settings.LLM_MODE.lower().strip()
+
+
+    def _resolve_provider_and_key(self, provider: Optional[str] = None):
+        """Resolve target provider credentials and base URL."""
+        p = (provider or "openai").lower().strip()
+        if p == LLMProvider.DEEPSEEK.value:
+            return LLMProvider.DEEPSEEK.value, settings.DEEPSEEK_API_KEY, self.deepseek_base_url
+        return LLMProvider.OPENAI.value, settings.OPENAI_API_KEY, self.openai_base_url
+
+    async def chat_completion(
+        self,
+        messages: List[Dict[str, str]],
+        provider: Optional[str] = None,
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        request_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Execute chat completion accepting OpenAI-style messages list."""
+        system_prompt = None
+        user_prompt = ""
+        for m in messages:
+            if m.get("role") == "system":
+                system_prompt = m.get("content")
+            elif m.get("role") == "user":
+                user_prompt += m.get("content", "") + "\n"
+        return await self.generate_completion(
+            prompt=user_prompt.strip(),
+            system_prompt=system_prompt,
+            provider=provider,
+            model=model,
+            temperature=temperature,
+            request_id=request_id,
+        )
 
     async def generate_completion(
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
+        provider: Optional[str] = None,
         model: Optional[str] = None,
         temperature: float = 0.7,
+        request_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Execute a text generation call with sanitized telemetry."""
+        """Execute text completion with strict provenance metadata and fail-fast validation."""
+        req_id = request_id or str(uuid.uuid4())
         target_model = model or self.default_model
-        logger.info(
-            f"LLM request initiated to model={target_model}",
-            extra={"model": target_model},
-        )
+        now_iso = datetime.now(timezone.utc).isoformat()
+        resolved_provider, api_key, base_url = self._resolve_provider_and_key(provider)
 
-        # In Phase 3, if no API key is provided, provide deterministic reasoning fallback
-        if not self.api_key:
-            logger.warning("No OPENAI_API_KEY configured. Returning synthetic reasoning response.")
+        # 1. Explicit Mock Mode
+        if self.current_mode == "mock":
+            logger.info(
+                f"Executing LLM reasoning in configured MOCK mode. Model={target_model}",
+                extra={"request_id": req_id},
+            )
+
             return {
-                "content": f"[Simulated Decision for prompt: {prompt[:50]}...]",
-                "model": target_model,
-                "usage": {"prompt_tokens": len(prompt.split()), "completion_tokens": 10, "total_tokens": len(prompt.split()) + 10},
-                "status": "simulated",
+                "content": f"[Simulated Response: Automated reasoning completed for prompt: '{prompt[:60]}...']",
+                "metadata": {
+                    "mode": LLMDecisionMode.SIMULATED.value,
+                    "provider": LLMProvider.MOCK.value,
+                    "model": target_model,
+                    "timestamp": now_iso,
+                    "request_id": req_id,
+                    "is_synthetic": True,
+                    "note": "Generated by local deterministic heuristic simulator; not a neural model inference.",
+                },
+                "usage": {
+                    "prompt_tokens": len(prompt.split()),
+                    "completion_tokens": 15,
+                    "total_tokens": len(prompt.split()) + 15,
+                },
             }
 
-        # Centralized HTTP request to OpenAI/vLLM endpoint
-        import httpx
+        # 2. Live Mode - Strict credential verification (FAIL-FAST)
+        if not api_key:
+            err_msg = (
+                f"LLM_MODE is 'live' but API key for provider '{resolved_provider}' is not configured. "
+                "Production policy prohibits silent fallback to fabricated intelligence."
+            )
+            logger.error(err_msg, extra={"request_id": req_id})
+            raise AppException(
+                message=err_msg,
+                status_code=503,
+                error_code="LLM_CREDENTIALS_MISSING",
+                details={"provider": resolved_provider, "mode": self.mode},
+            )
+
+        # 3. Live Mode - Network dispatch
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         messages = []
@@ -61,25 +159,38 @@ class LLMService:
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
                 response = await client.post(
-                    f"{self.base_url.rstrip('/')}/chat/completions",
+                    f"{base_url}/chat/completions",
                     headers=headers,
                     json=payload,
                 )
                 response.raise_for_status()
                 data = response.json()
+                content = data["choices"][0]["message"]["content"]
+
                 return {
-                    "content": data["choices"][0]["message"]["content"],
-                    "model": data.get("model", target_model),
+                    "content": content,
+                    "metadata": {
+                        "mode": LLMDecisionMode.LIVE_MODEL.value,
+                        "provider": resolved_provider,
+                        "model": data.get("model", target_model),
+                        "timestamp": now_iso,
+                        "request_id": req_id,
+                        "is_synthetic": False,
+                    },
                     "usage": data.get("usage", {}),
-                    "status": "success",
                 }
             except Exception as e:
-                logger.error(f"LLM API request failed: {e}")
-                return {
-                    "content": "LLM generation unavailable. Fallback rule applied.",
-                    "error": str(e),
-                    "status": "error",
-                }
+                logger.error(
+                    f"Live LLM provider '{resolved_provider}' failed: {e}",
+                    extra={"request_id": req_id},
+                )
+                raise AppException(
+                    message=f"Live LLM inference failed: {str(e)}",
+                    status_code=502,
+                    error_code="LLM_PROVIDER_ERROR",
+                    details={"provider": resolved_provider, "error": str(e)},
+                )
 
 
+# Global singleton instance
 llm_service = LLMService()

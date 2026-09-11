@@ -371,7 +371,7 @@ const TimelinePlayer = observer(({ initialInterval }: {
           size="small"
           placeholder="步数"
           value={jumpStep}
-          onChange={setJumpStep}
+          onChange={(val) => setJumpStep(typeof val === 'number' ? val : (val ? Number(val) : 0))}
           min={0}
           max={getMaxSteps()}
           precision={0}

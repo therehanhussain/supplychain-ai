@@ -10,9 +10,10 @@ const { Title } = Typography;
 // 定义产业图谱组件
 interface IndustryGraphProps {
   expId?: string;
+  style?: React.CSSProperties;
 }
 
-const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId }) => {
+const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId, style }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<Graph | null>(null);
   const [loading, setLoading] = useState(true);
@@ -356,7 +357,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId }) => {
     // 如果当前连线显示模式是交易或通信，则高亮对应的边
     if (edgeDisplayMode === 'transaction' || edgeDisplayMode === 'communication') {
       edges.forEach(edge => {
-        const edgeModel = edge.getModel();
+        const edgeModel = edge.getModel() as Record<string, any>;
         let shouldHighlight = false;
 
         // 检查交易边 - 使用新的steps数组
@@ -905,7 +906,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId }) => {
         if (stateData) {
           // 处理数据
           const processedData = await processIndustryData(stateData);
-          processedData.stateData = stateData;
+          (processedData as Record<string, any>).stateData = stateData;
           setData(processedData);
           message.success(`成功从 ${loadedFrom} 加载本地数据`);
           setLoading(false);
@@ -1200,7 +1201,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId }) => {
           target: edgeData.target,
           id: edgeData.id,
           type: 'transaction',
-          steps: Array.from(edgeData.steps).sort((a, b) => a - b), // 转换为排序数组
+          steps: Array.from(edgeData.steps).sort((a: any, b: any) => Number(a) - Number(b)), // 转换为排序数组
           transaction_data: {
             all_transactions: edgeData.transactions,
             step_count: edgeData.steps.size,
@@ -1262,7 +1263,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId }) => {
           target: edgeData.target,
           id: edgeData.id,
           type: 'communication',
-          steps: Array.from(edgeData.steps).sort((a, b) => a - b), // 转换为排序数组
+          steps: Array.from(edgeData.steps).sort((a: any, b: any) => Number(a) - Number(b)), // 转换为排序数组
           communication_data: {
             all_communications: edgeData.communications,
             step_count: edgeData.steps.size,
@@ -2136,7 +2137,7 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId }) => {
 
         // 处理与当前节点相关的边
         edges.forEach(edge => {
-          const edgeModel = edge.getModel();
+          const edgeModel = edge.getModel() as Record<string, any>;
 
           // 指向此节点的连线变为红色
           if (edgeModel.target === nodeId) {
@@ -2241,13 +2242,13 @@ const IndustryGraph: React.FC<IndustryGraphProps> = ({ expId: propExpId }) => {
 
         // 高亮相关边和节点
         edges.forEach(edge => {
-          const edgeModel = edge.getModel();
+          const edgeModel = edge.getModel() as Record<string, any>;
           if (edgeModel.source === nodeId || edgeModel.target === nodeId) {
             graph.setItemState(edge, 'selected', true);
             // edge.toFront(); // 移除toFront调用，避免图谱位置重置
 
             // 高亮相连的节点
-            const otherNodeId = edgeModel.source === nodeId ? edgeModel.target : edgeModel.source;
+            const otherNodeId = String(edgeModel.source === nodeId ? edgeModel.target : edgeModel.source);
             const otherNode = graph.findById(otherNodeId);
             if (otherNode) {
               graph.setItemState(otherNode, 'selected', true);

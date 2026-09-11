@@ -11,6 +11,13 @@ export interface Experiment {
     outputTokens: number;
     createdAt: string;
     updatedAt: string;
+    num_day?: number;
+    cur_day?: number;
+    cur_t?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    created_at?: string;
+    updated_at?: string;
 }
 
 export const experimentStatusMap: { [key: number]: string } = {

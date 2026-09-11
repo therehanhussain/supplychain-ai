@@ -1,0 +1,15 @@
+{
+  "nodes": [
+    { "id": "1", "label": "Apex Foundry", "type": "firm" },
+    { "id": "2", "label": "Shenzhen Micro", "type": "firm" },
+    { "id": "3", "label": "Bavaria Logistics", "type": "firm" },
+    { "id": "4", "label": "Central Consumer", "type": "citizen" },
+    { "id": "5", "label": "Retail Terminal", "type": "bank" }
+  ],
+  "edges": [
+    { "source": "1", "target": "2" },
+    { "source": "2", "target": "3" },
+    { "source": "3", "target": "4" },
+    { "source": "3", "target": "5" }
+  ]
+}

@@ -474,10 +474,14 @@ def get_enterprise_data_by_id(agent_id):
         with open(json_path, "r", encoding="utf-8") as f:
             raw_data = json.load(f)
     except FileNotFoundError:
-        # 如果相对路径不工作，尝试绝对路径
-        json_path = "/home/cuda/agentsociety-enterprise/neo4j/industry_test.json"
-        with open(json_path, "r", encoding="utf-8") as f:
-            raw_data = json.load(f)
+        # Check alternative relative path from working directory
+        cwd_candidate = os.path.join(os.getcwd(), "neo4j", "industry_test.json")
+        if os.path.exists(cwd_candidate):
+            with open(cwd_candidate, "r", encoding="utf-8") as f:
+                raw_data = json.load(f)
+        else:
+            raise FileNotFoundError(f"Topology dataset not found at '{json_path}' or '{cwd_candidate}'")
+
 
     # 遍历所有level找到对应id的企业
     for level_data in raw_data.values():

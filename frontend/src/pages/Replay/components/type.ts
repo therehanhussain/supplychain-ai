@@ -1,27 +1,29 @@
 export interface AgentProfile {
     id: string;
     name: string;
-    profile?: { [key: string]: string | number };
+    profile?: { [key: string]: any };
 }
 
 export interface AgentStatus {
     id: string;
     day: number;
     t: number;
-    lng: number;
-    lat: number;
-    parent_id: number;
-    action: string;
-    status: { [key: string]: string | number };
+    lng?: number;
+    lat?: number;
+    parent_id?: number;
+    action?: string;
+    status: { [key: string]: any };
 }
 
 export interface AgentDialog {
     id: string;
     day: number;
     t: number;
-    type: 0 | 1 | 2;
-    speaker: string;
-    content: string;
+    type: 0 | 1 | 2 | string;
+    speaker?: string;
+    content?: string;
+    dialog?: any;
+    [key: string]: any;
 }
 
 export interface AgentSurvey {

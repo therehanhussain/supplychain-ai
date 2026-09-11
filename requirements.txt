@@ -13,8 +13,17 @@ starlette>=0.38.0
 psycopg[binary]>=3.1.0
 asyncpg>=0.29.0
 sqlalchemy>=2.0.0
+alembic>=1.13.0
+aiosqlite>=0.20.0
 neo4j>=5.20.0
+
+# Security & Authentication
+bcrypt>=4.0.0
+pyjwt>=2.8.0
+passlib[bcrypt]>=1.7.4
+email-validator>=2.0.0
 
 # Data Analysis & Compatibility
 pandas>=2.2.0
 pyyaml>=6.0.0
+

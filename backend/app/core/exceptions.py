@@ -21,12 +21,15 @@ class AppException(Exception):
         code: str = "INTERNAL_ERROR",
         status_code: int = status.HTTP_500_INTERNAL_SERVER_ERROR,
         details: Optional[Dict[str, Any]] = None,
+        error_code: Optional[str] = None,
     ):
         super().__init__(message)
         self.message = message
-        self.code = code
+        self.code = error_code or code
+        self.error_code = self.code
         self.status_code = status_code
         self.details = details or {}
+
 
 
 class NotFoundException(AppException):
@@ -64,11 +67,13 @@ def register_exception_handlers(app: FastAPI) -> None:
             content={
                 "status": exc.status_code,
                 "code": exc.code,
+                "error_code": exc.code,
                 "message": exc.message,
                 "details": exc.details,
                 "request_id": request_id,
             },
         )
+
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(request: Request, exc: StarletteHTTPException):

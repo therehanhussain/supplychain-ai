@@ -61,14 +61,18 @@ class Settings(BaseSettings):
     NEO4J_DATABASE: str = Field(default="neo4j")
 
     # Centralized LLM Gateway
+    LLM_MODE: str = Field(default="mock", description="'live' or 'mock'")
     OPENAI_API_KEY: str = Field(default="")
     OPENAI_BASE_URL: str = Field(default="https://api.openai.com/v1")
+    DEEPSEEK_API_KEY: str = Field(default="")
+    DEEPSEEK_BASE_URL: str = Field(default="https://api.deepseek.com/v1")
     DEFAULT_LLM_MODEL: str = Field(default="gpt-4o-mini")
 
     # Security & JWT Tokens
     JWT_SECRET: str = Field(default="development_fallback_secret_must_override_in_production_32chars")
     JWT_ALGORITHM: str = Field(default="HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=60)
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7)
 
     # Asynchronous Workers
     CELERY_WORKER_CONCURRENCY: int = Field(default=2)

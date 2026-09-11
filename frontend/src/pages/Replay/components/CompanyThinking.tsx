@@ -130,7 +130,7 @@ const CompanyThinking: React.FC<CompanyThinkingProps> = ({ nodeData, nodeId, cur
   }
 
   // 渲染思考记录
-  const renderThinkingRecord = (thought: any, index: number) => {
+  const renderThinkingRecord = (thought: any, index: number | string) => {
     // 处理"nothing to think"的情况
     if (thought.detailedText === 'nothing to think') {
       return (

@@ -57,6 +57,11 @@ export class ReplayStore {
         return localStorage.getItem('localDataPath') !== null;
     }
 
+    get maxStep(): number {
+        if (!this._timeline || this._timeline.length === 0) return 0;
+        return Math.max(...this._timeline.map(t => (typeof t.step === 'number' ? t.step : (typeof t.t === 'number' ? t.t : 0))), 0);
+    }
+
     constructor() {
         makeAutoObservable(this)
     }
@@ -392,11 +397,14 @@ export class ReplayStore {
                                     }
                                     // 创建Agent对象
                                     const agent: Agent = {
+                                        id: String(companyInfo.id || companyInfo.name),
                                         name: companyInfo.name,
                                         lng: lng,
                                         lat: lat,
                                         day: this._currentTime?.day || 0,
                                         t: this._currentTime?.t || 0,
+                                        parent_id: 0,
+                                        action: "",
                                         status: {},
                                         profile: {
                                             description: "",
@@ -451,6 +459,8 @@ export class ReplayStore {
                                         lat: lat,
                                         day: this._currentTime?.day || 0,
                                         t: this._currentTime?.t || 0,
+                                        parent_id: 0,
+                                        action: "",
                                         status: {},
                                         profile: {
                                             description: "",
@@ -520,6 +530,8 @@ export class ReplayStore {
                                     lat: node.lat,
                                     day: this._currentTime?.day || 0,
                                     t: this._currentTime?.t || 0,
+                                    parent_id: node.parent_id || 0,
+                                    action: node.action || "",
                                     status: status,
                                     profile: {
                                         description: node.description || "",
@@ -696,6 +708,10 @@ export class ReplayStore {
                     id: agentId,
                     day: 0,
                     t: data.step,
+                    lng: 116.39,
+                    lat: 39.90,
+                    parent_id: 0,
+                    action: "",
                     status: {
                         company_name: data.company_name || '',
                         company_fund: data.company_fund || 0,
@@ -782,16 +798,17 @@ export class ReplayStore {
             // 如果 agent 不存在，尝试从 _agent2Profile 中获取
             const profile = this._agent2Profile.get(agentID);
             if (profile) {
+                const tempAgent: Agent = {
+                    ...profile,
+                    lng: 116.39 + Math.random() * 0.1 - 0.05,
+                    lat: 39.90 + Math.random() * 0.1 - 0.05,
+                    day: this._currentTime?.day || 0,
+                    t: this._currentTime?.t || 0,
+                    parent_id: 0,
+                    action: "",
+                    status: {}
+                };
                 runInAction(() => {
-                    // 创建一个临时 agent 并添加到 agents 中
-                    const tempAgent: Agent = {
-                        ...profile,
-                        lng: 116.39 + Math.random() * 0.1 - 0.05,
-                        lat: 39.90 + Math.random() * 0.1 - 0.05,
-                        day: this._currentTime?.day || 0,
-                        t: this._currentTime?.t || 0,
-                        status: {}
-                    };
                     this.agents.set(agentID, tempAgent);
                 });
                 console.log('Created temporary agent:', tempAgent);

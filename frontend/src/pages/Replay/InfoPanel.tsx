@@ -9,6 +9,83 @@ import { Api } from '../../services/api';
 
 const { Title, Text } = Typography;
 
+// 动态字段名映射函数
+export const getFieldDisplayName = (key: string): string => {
+  // 公司名称字段
+  if (key === 'company_name' || key.includes('company_name_')) {
+    return '公司名称';
+  }
+  // 产业层级
+  if (key === 'industry_level' || key.includes('industry_level_')) {
+    return '产业层级';
+  }
+  // 智能水平
+  if (key === 'intelligence_level' || key.includes('intelligence_level_')) {
+    return '智能水平';
+  }
+  // 公司资金
+  if (key === 'company_fund' || key.includes('company_fund_')) {
+    return '公司资金';
+  }
+  // 公司描述
+  if (key === 'description' || key.includes('description_')) {
+    return '公司描述';
+  }
+  // 代理ID
+  if (key.includes('agent_id_')) {
+    return '代理ID';
+  }
+  // 初始资金
+  if (key.includes('initial_fund_')) {
+    return '初始资金';
+  }
+  // 原料库存名称
+  if (key.includes('material_inventory_') && key.includes('_name')) {
+    const match = key.match(/material_inventory_(\d+)_.*_name/);
+    if (match) {
+      const materialNum = match[1];
+      return `原料${materialNum}库存名称`;
+    }
+    return '原料库存名称';
+  }
+  // 原料库存数量
+  if (key.includes('material_inventory_') && key.includes('_quantity')) {
+    const match = key.match(/material_inventory_(\d+)_.*_quantity/);
+    if (match) {
+      const materialNum = match[1];
+      return `原料${materialNum}库存数量`;
+    }
+    return '原料库存数量';
+  }
+
+  // 原料字段模式匹配
+  const materialMatch = key.match(/^material_(\d+)_([A-Z]\d+)_(id|name)$/);
+  if (materialMatch) {
+    const [, materialNum, , type] = materialMatch;
+    return type === 'id' ? `原料${materialNum}产品ID` : `原料${materialNum}名称`;
+  }
+
+  // 产品字段模式匹配
+  const productMatch = key.match(/^product_(\d+)_([A-Z]\d+)_(.+)$/);
+  if (productMatch) {
+    const [, productNum, , attribute] = productMatch;
+    const attributeMap: Record<string, string> = {
+      'base_price': '基础价格',
+      'initial_inventory': '初始库存',
+      'is_terminal_product': '是否终端产品',
+      'manufacturing_cost': '生产成本',
+      'name': '名称',
+      'product_construct': '原料构成',
+      'profit_margin': '利润率'
+    };
+    const displayAttribute = attributeMap[attribute] || attribute;
+    return `产品${productNum}${displayAttribute}`;
+  }
+
+  // 如果没有匹配到模式，返回原字段名
+  return key;
+};
+
 interface InfoPanelProps {
   exp_id: string;
 }
@@ -553,83 +630,6 @@ const InfoPanel = observer((props: InfoPanelProps) => {
           });
 
           return categories;
-        };
-
-        // 动态字段名映射函数
-        const getFieldDisplayName = (key: string): string => {
-          // 公司名称字段
-          if (key === 'company_name' || key.includes('company_name_')) {
-            return '公司名称';
-          }
-          // 产业层级
-          if (key === 'industry_level' || key.includes('industry_level_')) {
-            return '产业层级';
-          }
-          // 智能水平
-          if (key === 'intelligence_level' || key.includes('intelligence_level_')) {
-            return '智能水平';
-          }
-          // 公司资金
-          if (key === 'company_fund' || key.includes('company_fund_')) {
-            return '公司资金';
-          }
-          // 公司描述
-          if (key === 'description' || key.includes('description_')) {
-            return '公司描述';
-          }
-          // 代理ID
-          if (key.includes('agent_id_')) {
-            return '代理ID';
-          }
-          // 初始资金
-          if (key.includes('initial_fund_')) {
-            return '初始资金';
-          }
-          // 原料库存名称
-          if (key.includes('material_inventory_') && key.includes('_name')) {
-            const match = key.match(/material_inventory_(\d+)_.*_name/);
-            if (match) {
-              const materialNum = match[1];
-              return `原料${materialNum}库存名称`;
-            }
-            return '原料库存名称';
-          }
-          // 原料库存数量
-          if (key.includes('material_inventory_') && key.includes('_quantity')) {
-            const match = key.match(/material_inventory_(\d+)_.*_quantity/);
-            if (match) {
-              const materialNum = match[1];
-              return `原料${materialNum}库存数量`;
-            }
-            return '原料库存数量';
-          }
-
-          // 原料字段模式匹配
-          const materialMatch = key.match(/^material_(\d+)_([A-Z]\d+)_(id|name)$/);
-          if (materialMatch) {
-            const [, materialNum, , type] = materialMatch;
-            return type === 'id' ? `原料${materialNum}产品ID` : `原料${materialNum}名称`;
-          }
-
-          // 产品字段模式匹配
-          const productMatch = key.match(/^product_(\d+)_([A-Z]\d+)_(.+)$/);
-          if (productMatch) {
-            const [, productNum, , attribute] = productMatch;
-            const attributeMap: Record<string, string> = {
-              'base_price': '基础价格',
-              'initial_inventory': '初始库存',
-              'is_terminal_product': '是否终端产品',
-              'manufacturing_cost': '生产成本',
-              'name': '名称',
-              'product_construct': '原料构成',
-              'profit_margin': '利润率'
-            };
-            const displayAttribute = attributeMap[attribute] || attribute;
-            return `产品${productNum}${displayAttribute}`;
-          }
-
-          // 如果没有匹配到模式，返回原字段名
-          return key;
         };
 
         const categories = categorizeFields(paramsData);
@@ -1535,11 +1535,11 @@ const InfoPanel = observer((props: InfoPanelProps) => {
                   Object.entries(agent.profile)
                     .filter(([k, v]) => v !== undefined && v !== null && v !== '' && v !== '-' && v !== 0)
                     .map(([k, v]) => {
-                      let displayValue = v;
+                      let displayValue: any = v;
                       try {
                         if (k === 'main_products' || k === 'relative_products' || k.includes('product') || k.includes('material')) {
                           displayValue = formatProductList(v);
-                        } else if (typeof v === 'object') {
+                        } else if (typeof v === 'object' && v !== null) {
                           // 对象类型，转换为格式化的字符串
                           if (Array.isArray(v) && v.length > 0) {
                              // 如果是对象数组，尝试提取关键信息
@@ -1563,7 +1563,7 @@ const InfoPanel = observer((props: InfoPanelProps) => {
                              }).join(', ');
 
                             // 如果结果太长，截断显示
-                            if (displayValue.length > 100) {
+                            if (typeof displayValue === 'string' && displayValue.length > 100) {
                               displayValue = displayValue.substring(0, 100) + '...';
                             }
                           } else {
@@ -1610,11 +1610,11 @@ const InfoPanel = observer((props: InfoPanelProps) => {
                   return (
                     <>
                       {entries.map(([k, v]) => {
-                        let displayValue = v;
+                        let displayValue: any = v;
                         try {
                           if (k === 'main_products' || k.includes('product') || k.includes('material')) {
                             displayValue = formatProductList(v);
-                          } else if (typeof v === 'object') {
+                          } else if (typeof v === 'object' && v !== null) {
                             // 对象类型，转换为格式化的字符串
                             if (Array.isArray(v) && v.length > 0) {
                                // 如果是对象数组，尝试提取关键信息
@@ -1638,7 +1638,7 @@ const InfoPanel = observer((props: InfoPanelProps) => {
                                }).join(', ');
 
                               // 如果结果太长，截断显示
-                              if (displayValue.length > 100) {
+                              if (typeof displayValue === 'string' && displayValue.length > 100) {
                                 displayValue = displayValue.substring(0, 100) + '...';
                               }
                             } else {
@@ -1674,7 +1674,7 @@ const InfoPanel = observer((props: InfoPanelProps) => {
                       ) : (agent.status.product_inventory && (() => {
                         // 限制显示的产品数量，避免过多数据导致渲染缓慢
                         const maxDisplayItems = 20;
-                        const inventory = agent.status.product_inventory;
+                        const inventory: any = agent.status.product_inventory;
                         let entries = [];
 
                         try {
