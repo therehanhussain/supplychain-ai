@@ -17,8 +17,9 @@ services:
       - "443:443"
       - "443:443/udp" # HTTP/3 QUIC support
     environment:
-      - DOMAIN=${DOMAIN:-example.com}
+      - DOMAIN=${DOMAIN:-}
       - ACME_EMAIL=${ACME_EMAIL:-admin@example.com}
+      - SITE_ADDRESS=${SITE_ADDRESS:-api.${DOMAIN:-localhost}}
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

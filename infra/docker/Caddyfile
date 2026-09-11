@@ -8,10 +8,9 @@
     # Global Configuration
     email {$ACME_EMAIL:admin@example.com}
     admin off
-    auto_https disable_redirects # Caddy still manages HTTPS on 443 and redirects 80 automatically
 }
 
-api.{$DOMAIN:example.com} {
+{$SITE_ADDRESS:api.{$DOMAIN:localhost}} {
     # --------------------------------------------------------------------------
     # 1. Transport & Security Headers
     # --------------------------------------------------------------------------

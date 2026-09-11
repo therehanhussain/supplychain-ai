@@ -45,7 +45,26 @@ check_placeholder "JWT_SECRET"
 check_placeholder "POSTGRES_PASSWORD"
 check_placeholder "REDIS_PASSWORD"
 check_placeholder "NEO4J_PASSWORD"
-check_placeholder "DOMAIN"
+
+# Domain validation with support for Domainless Bootstrap Mode
+BOOTSTRAP_MODE_ACTIVE=0
+if [ "${1:-}" = "--bootstrap" ] || [ "${BOOTSTRAP_MODE:-false}" = "true" ]; then
+    BOOTSTRAP_MODE_ACTIVE=1
+fi
+
+if [ -z "${DOMAIN:-}" ] || [[ "${DOMAIN:-}" == *"PLACEHOLDER"* ]] || [[ "${DOMAIN:-}" == "example.com" ]]; then
+    if [ ${BOOTSTRAP_MODE_ACTIVE} -eq 1 ]; then
+        echo "[!] NOTICE: Running in DOMAINLESS BOOTSTRAP MODE (--bootstrap)."
+        echo "    Caddy will serve on HTTP (:80) for host verification without public TLS certificate acquisition."
+        echo "    Full production HTTPS will be activated once DOMAIN is set and DNS is pointed."
+        export SITE_ADDRESS="${SITE_ADDRESS:-:80}"
+    else
+        echo "[-] ERROR: Variable DOMAIN is empty, placeholder, or default (example.com)."
+        echo "    To deploy with automated HTTPS/TLS, set DOMAIN to your real registered domain in ${ENV_FILE}."
+        echo "    To test on a fresh VPS before domain purchase, run: ./scripts/deploy_production.sh --bootstrap"
+        FAIL_VALIDATION=1
+    fi
+fi
 
 if [ ${FAIL_VALIDATION} -ne 0 ]; then
     echo "[-] Aborting deployment due to missing or placeholder secrets."
@@ -107,7 +126,12 @@ wait_for_health "backend"
 # 8. Deployment Status Report
 echo "========================================================================"
 echo " SupplyChainAgent Production Deployment Completed Successfully"
-echo " Ingress Endpoint: https://api.${DOMAIN}"
+if [ ${BOOTSTRAP_MODE_ACTIVE} -eq 1 ]; then
+    echo " Ingress Endpoint: http://<VPS_PUBLIC_IP> (Bootstrap Mode — Plain HTTP on Port 80)"
+    echo " Notice: Configure DOMAIN and DNS A-record when ready for automated TLS."
+else
+    echo " Ingress Endpoint: https://${SITE_ADDRESS:-api.${DOMAIN}}"
+fi
 echo " CORS Origin Authorized: ${CORS_ORIGINS}"
 echo "========================================================================"
 docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" ps

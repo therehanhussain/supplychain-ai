@@ -1,6 +1,9 @@
 /avro
 .vscode/
 .env
+.env.*
+!.env.example
+!.env.*.example
 cache/
 .python-version
 .venv/
