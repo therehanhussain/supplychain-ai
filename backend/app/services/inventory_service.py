@@ -111,17 +111,33 @@ class InventoryService:
             self.db.add(product)
             await self.db.flush()
 
-        # Create inventory entry
-        inventory = Inventory(
-            organization_id=self.organization_id,
-            warehouse_id=warehouse.id,
-            product_id=product.id,
-            quantity=int(payload.quantity_on_hand),
-            safety_stock=int(payload.reorder_point / 2),
-            reorder_point=int(payload.reorder_point),
+        # Find or create inventory entry
+        inv_check = await self.db.execute(
+            select(Inventory).where(
+                Inventory.organization_id == self.organization_id,
+                Inventory.warehouse_id == warehouse.id,
+                Inventory.product_id == product.id,
+            )
         )
-        created = await self.repo.create(inventory)
+        existing_inv = inv_check.scalar_one_or_none()
+        if existing_inv:
+            existing_inv.quantity = int(payload.quantity_on_hand)
+            existing_inv.reorder_point = int(payload.reorder_point)
+            existing_inv.safety_stock = int(payload.reorder_point / 2)
+            await self.db.commit()
+            created = existing_inv
+        else:
+            inventory = Inventory(
+                organization_id=self.organization_id,
+                warehouse_id=warehouse.id,
+                product_id=product.id,
+                quantity=int(payload.quantity_on_hand),
+                safety_stock=int(payload.reorder_point / 2),
+                reorder_point=int(payload.reorder_point),
+            )
+            created = await self.repo.create(inventory)
         loaded = await self.repo.get_by_id_and_org(created.id, self.organization_id)
+
 
         return InventoryItemResponse(
             id=loaded.id,

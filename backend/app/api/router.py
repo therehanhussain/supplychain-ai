@@ -17,6 +17,7 @@ from backend.app.api.v1.forecast import router as forecast_router
 from backend.app.api.v1.risk import router as risk_router
 from backend.app.api.v1.agents import router as agents_router
 from backend.app.api.v1.analytics import router as analytics_router
+from backend.app.api.v1.manufacturing import router as manufacturing_router
 from backend.app.api.legacy import router as legacy_router
 
 # Master v1 router prefixing /api/v1
@@ -32,6 +33,8 @@ v1_router.include_router(forecast_router)
 v1_router.include_router(risk_router)
 v1_router.include_router(agents_router)
 v1_router.include_router(analytics_router)
+v1_router.include_router(manufacturing_router)
+
 
 # Master root router
 api_router = APIRouter()

@@ -25,10 +25,21 @@ class AppException(Exception):
     ):
         super().__init__(message)
         self.message = message
-        self.code = error_code or code
-        self.error_code = self.code
-        self.status_code = status_code
-        self.details = details or {}
+        if isinstance(code, int):
+            # Positional argument compatibility: AppException(message, status_code, code)
+            actual_status = code
+            actual_code = str(status_code if isinstance(status_code, str) else (error_code or details or "APP_ERROR"))
+            self.status_code = actual_status
+            self.code = actual_code
+            self.error_code = actual_code
+            self.details = details if isinstance(details, dict) else {}
+        else:
+            self.code = error_code or code
+            self.error_code = self.code
+            self.status_code = status_code
+            self.details = details or {}
+
+
 
 
 
