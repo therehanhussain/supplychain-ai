@@ -30,7 +30,6 @@ COPY backend /app/backend
 COPY firmagentsql /app/firmagentsql
 COPY neo4j /app/neo4j
 COPY utils /app/utils
-COPY data /app/data
 
 # Change ownership to non-root user
 RUN chown -R appuser:appgroup /app

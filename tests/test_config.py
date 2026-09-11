@@ -1,6 +1,7 @@
 """Test Configuration and Environment Loading."""
 
-from backend.app.core.config import Settings
+import pytest
+from backend.app.core.config import Settings, DEV_FALLBACK_JWT_SECRET
 
 
 def test_config_defaults_and_env():
@@ -17,3 +18,31 @@ def test_cors_origins_list_parsing():
     assert isinstance(s.CORS_ORIGINS, list)
     assert len(s.CORS_ORIGINS) == 2
     assert "http://localhost:5173" in s.CORS_ORIGINS
+
+
+def test_cors_origins_default_includes_vercel_production():
+    """Verify default CORS origins authorize the deployed Vercel frontend."""
+    s = Settings()
+    assert "https://frontend-pi-hazel-83.vercel.app" in s.CORS_ORIGINS
+
+
+def test_production_jwt_secret_validation_enforced():
+    """Verify production environment blocks default fallback JWT secret."""
+    with pytest.raises(ValueError, match="Production deployment security violation"):
+        Settings(ENVIRONMENT="production", JWT_SECRET=DEV_FALLBACK_JWT_SECRET)
+
+
+def test_production_jwt_secret_short_key_rejected():
+    """Verify production environment rejects JWT secret shorter than 32 characters."""
+    with pytest.raises(ValueError, match="cryptographically secure key of at least 32 characters"):
+        Settings(ENVIRONMENT="production", JWT_SECRET="short_secret_key_123")
+
+
+def test_production_jwt_secret_valid_key_accepted():
+    """Verify production environment accepts strong 32+ char secret."""
+    s = Settings(
+        ENVIRONMENT="production",
+        JWT_SECRET="a_very_strong_cryptographic_production_secret_key_32_chars!",
+    )
+    assert s.ENVIRONMENT == "production"
+    assert s.JWT_SECRET.startswith("a_very_strong")

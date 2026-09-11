@@ -34,6 +34,11 @@ def test_readiness_endpoint(client: TestClient):
     assert data["status"] == "ready"
     assert "dependencies" in data
     assert "database" in data["dependencies"]
+    assert "postgres" in data["dependencies"]
+    assert "neo4j" in data["dependencies"]
+    assert "redis" in data["dependencies"]
+    assert "celery" in data["dependencies"]
+    assert "llm" in data["dependencies"]
 
 
 def test_api_v1_health_alias(client: TestClient):

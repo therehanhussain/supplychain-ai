@@ -5,8 +5,10 @@ using Pydantic BaseSettings.
 """
 
 from typing import List, Union
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEV_FALLBACK_JWT_SECRET = "development_fallback_secret_must_override_in_production_32chars"
 
 
 class Settings(BaseSettings):
@@ -29,7 +31,7 @@ class Settings(BaseSettings):
 
     # CORS Configuration
     CORS_ORIGINS: Union[str, List[str]] = Field(
-        default=["http://localhost:5173", "http://localhost:3000"],
+        default=["http://localhost:5173", "http://localhost:3000", "https://frontend-pi-hazel-83.vercel.app"],
         description="Allowed origins for CORS (comma-separated or list)",
     )
 
@@ -40,7 +42,7 @@ class Settings(BaseSettings):
             return [i.strip() for i in v.split(",") if i.strip()]
         elif isinstance(v, (list, tuple)):
             return [str(i).strip() for i in v if str(i).strip()]
-        return ["http://localhost:5173", "http://localhost:3000"]
+        return ["http://localhost:5173", "http://localhost:3000", "https://frontend-pi-hazel-83.vercel.app"]
 
     # PostgreSQL Database
     DATABASE_URL: str = Field(
@@ -86,6 +88,19 @@ class Settings(BaseSettings):
     RATE_LIMIT_AUTHENTICATED: int = Field(default=120, description="Max requests per minute for authenticated clients")
     RATE_LIMIT_SIMULATION: int = Field(default=10, description="Max requests per minute for simulation/AI dispatch")
 
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        """Strictly prevent insecure fallback keys from running in production environment."""
+        if self.ENVIRONMENT.lower() == "production":
+            if self.JWT_SECRET == DEV_FALLBACK_JWT_SECRET or not self.JWT_SECRET or len(self.JWT_SECRET) < 32:
+                raise ValueError(
+                    "Production deployment security violation: In 'production' environment, "
+                    "JWT_SECRET must be explicitly provided via environment variables with a "
+                    "cryptographically secure key of at least 32 characters."
+                )
+        return self
+
 
 # Global cached settings instance
 settings = Settings()
+

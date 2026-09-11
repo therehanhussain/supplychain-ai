@@ -13,7 +13,7 @@ os.environ["ENVIRONMENT"] = "testing"
 os.environ["DEBUG"] = "false"
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{TEST_DB_FILE}"
 os.environ["JWT_SECRET"] = "testing_secret_key_with_at_least_32_chars_long!"
-os.environ["CORS_ORIGINS"] = "http://localhost:3000,http://localhost:5173"
+os.environ["CORS_ORIGINS"] = "http://localhost:3000,http://localhost:5173,https://frontend-pi-hazel-83.vercel.app"
 os.environ["OPENAI_API_KEY"] = ""
 os.environ["LLM_MODE"] = "mock"
 
