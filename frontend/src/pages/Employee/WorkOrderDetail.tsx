@@ -17,6 +17,7 @@ import {
   Alert,
   Spin,
   Tooltip,
+  Select,
 } from 'antd';
 import {
   ArrowLeftOutlined,
@@ -40,6 +41,7 @@ import EmptyState from '../../components/common/EmptyState';
 import ErrorState from '../../components/common/ErrorState';
 
 const { Title, Text, Paragraph } = Typography;
+const { Option } = Select;
 
 export const WorkOrderDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -95,7 +97,11 @@ export const WorkOrderDetail: React.FC = () => {
   const handleOpenConsume = (record: MaterialRequirementItem) => {
     setSelectedMaterial(record);
     form.resetFields();
+    const lots = (workOrder?.lot_holdings || []).filter(
+      (h) => h.product_id === record.product_id && h.remaining_holding > 0
+    );
     form.setFieldsValue({
+      lot_id: lots.length === 1 ? lots[0].lot_id : undefined,
       quantity: record.remaining_issued_holding > 0 ? Math.min(1.0, record.remaining_issued_holding) : 0,
       reason: 'Production assembly',
     });
@@ -105,7 +111,11 @@ export const WorkOrderDetail: React.FC = () => {
   const handleOpenReturn = (record: MaterialRequirementItem) => {
     setSelectedMaterial(record);
     form.resetFields();
+    const lots = (workOrder?.lot_holdings || []).filter(
+      (h) => h.product_id === record.product_id && h.remaining_holding > 0
+    );
     form.setFieldsValue({
+      lot_id: lots.length === 1 ? lots[0].lot_id : undefined,
       quantity: record.remaining_issued_holding > 0 ? Math.min(1.0, record.remaining_issued_holding) : 0,
       reason: 'Surplus material returned to store',
     });
@@ -115,7 +125,11 @@ export const WorkOrderDetail: React.FC = () => {
   const handleOpenWaste = (record: MaterialRequirementItem) => {
     setSelectedMaterial(record);
     form.resetFields();
+    const lots = (workOrder?.lot_holdings || []).filter(
+      (h) => h.product_id === record.product_id && h.remaining_holding > 0
+    );
     form.setFieldsValue({
+      lot_id: lots.length === 1 ? lots[0].lot_id : undefined,
       quantity: record.remaining_issued_holding > 0 ? Math.min(1.0, record.remaining_issued_holding) : 0,
       reason: '',
     });
@@ -143,6 +157,7 @@ export const WorkOrderDetail: React.FC = () => {
       await controlTowerApi.consumeMaterial({
         work_order_id: workOrder.id,
         product_id: selectedMaterial.product_id,
+        lot_id: values.lot_id || undefined,
         quantity: values.quantity,
         unit_of_measure: selectedMaterial.unit_of_measure,
         reason: values.reason,
@@ -170,6 +185,7 @@ export const WorkOrderDetail: React.FC = () => {
       await controlTowerApi.returnMaterial({
         work_order_id: workOrder.id,
         product_id: selectedMaterial.product_id,
+        lot_id: values.lot_id || undefined,
         quantity: values.quantity,
         unit_of_measure: selectedMaterial.unit_of_measure,
         reason: values.reason,
@@ -197,6 +213,7 @@ export const WorkOrderDetail: React.FC = () => {
       await controlTowerApi.reportWastage({
         work_order_id: workOrder.id,
         product_id: selectedMaterial.product_id,
+        lot_id: values.lot_id || undefined,
         quantity: values.quantity,
         unit_of_measure: selectedMaterial.unit_of_measure,
         reason: values.reason,
@@ -469,6 +486,93 @@ export const WorkOrderDetail: React.FC = () => {
         )}
       </Card>
 
+      {/* Work Order Lot Holdings Table */}
+      {workOrder.lot_holdings && workOrder.lot_holdings.length > 0 && (
+        <Card
+          title={
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Space>
+                <ThunderboltOutlined style={{ color: '#059669' }} />
+                <Text strong style={{ fontSize: 16 }}>Physical Material Lot Holdings</Text>
+                <Tag color="cyan">{workOrder.lot_holdings.length} Active Lots</Tag>
+              </Space>
+              <Text type="secondary" style={{ fontSize: 13 }}>
+                Multi-Lot Isolation: <Text code>Holding = Issued - Consumed - Returned - Wastage</Text>
+              </Text>
+            </div>
+          }
+          bordered
+          style={{ borderRadius: 8, marginTop: 24 }}
+        >
+          <Table
+            dataSource={workOrder.lot_holdings}
+            rowKey="id"
+            pagination={false}
+            columns={[
+              {
+                title: 'Lot Number',
+                key: 'lot_number',
+                render: (_: any, r: any) => (
+                  <Space direction="vertical" size={0}>
+                    <Text strong style={{ color: '#1E40AF', fontFamily: 'monospace' }}>
+                      {r.lot_number || 'LOT-N/A'}
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      ID: <Text code>{r.lot_id.substring(0, 8)}...</Text>
+                    </Text>
+                  </Space>
+                ),
+              },
+              {
+                title: 'Material Component',
+                key: 'product',
+                render: (_: any, r: any) => (
+                  <Space direction="vertical" size={0}>
+                    <Text strong>{r.product_name || r.product_sku}</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      SKU: <Text code>{r.product_sku || 'N/A'}</Text>
+                    </Text>
+                  </Space>
+                ),
+              },
+              {
+                title: 'Issued to WO',
+                dataIndex: 'issued_quantity',
+                key: 'issued',
+                render: (qty: number, r: any) => `${qty} ${r.unit_of_measure}`,
+              },
+              {
+                title: 'Consumed',
+                dataIndex: 'consumed_quantity',
+                key: 'consumed',
+                render: (qty: number, r: any) => `${qty} ${r.unit_of_measure}`,
+              },
+              {
+                title: 'Returned',
+                dataIndex: 'returned_quantity',
+                key: 'returned',
+                render: (qty: number, r: any) => `${qty} ${r.unit_of_measure}`,
+              },
+              {
+                title: 'Wastage',
+                dataIndex: 'wastage_quantity',
+                key: 'wastage',
+                render: (qty: number, r: any) => `${qty} ${r.unit_of_measure}`,
+              },
+              {
+                title: 'Floor Holding Balance',
+                key: 'remaining_holding',
+                render: (_: any, r: any) => (
+                  <Tag color={r.remaining_holding > 0 ? 'green' : 'default'} style={{ fontWeight: 600, fontSize: 13, padding: '2px 8px' }}>
+                    {r.remaining_holding} {r.unit_of_measure}
+                  </Tag>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
+
       {/* Material Requisitions Status Table */}
       <Card
         title={
@@ -588,6 +692,23 @@ export const WorkOrderDetail: React.FC = () => {
           style={{ marginBottom: 16 }}
         />
         <Form form={form} layout="vertical">
+          {((workOrder?.lot_holdings || []).filter((h) => h.product_id === selectedMaterial?.product_id).length > 0) && (
+            <Form.Item
+              name="lot_id"
+              label="Select Work Order Lot Holding"
+              tooltip="Specify which raw material lot you are using for strict traceability."
+            >
+              <Select placeholder="Select holding lot (optional if unallocated)" allowClear>
+                {(workOrder?.lot_holdings || [])
+                  .filter((h) => h.product_id === selectedMaterial?.product_id)
+                  .map((h) => (
+                    <Option key={h.lot_id} value={h.lot_id} disabled={h.remaining_holding <= 0}>
+                      {h.lot_number || h.lot_id} — Holding: {h.remaining_holding} {h.unit_of_measure}
+                    </Option>
+                  ))}
+              </Select>
+            </Form.Item>
+          )}
           <Form.Item
             name="quantity"
             label={`Quantity to Consume (${selectedMaterial?.unit_of_measure})`}
@@ -641,6 +762,23 @@ export const WorkOrderDetail: React.FC = () => {
           style={{ marginBottom: 16 }}
         />
         <Form form={form} layout="vertical">
+          {((workOrder?.lot_holdings || []).filter((h) => h.product_id === selectedMaterial?.product_id).length > 0) && (
+            <Form.Item
+              name="lot_id"
+              label="Select Work Order Lot Holding"
+              tooltip="Specify which lot balance you are returning to store."
+            >
+              <Select placeholder="Select holding lot (optional if unallocated)" allowClear>
+                {(workOrder?.lot_holdings || [])
+                  .filter((h) => h.product_id === selectedMaterial?.product_id)
+                  .map((h) => (
+                    <Option key={h.lot_id} value={h.lot_id} disabled={h.remaining_holding <= 0}>
+                      {h.lot_number || h.lot_id} — Holding: {h.remaining_holding} {h.unit_of_measure}
+                    </Option>
+                  ))}
+              </Select>
+            </Form.Item>
+          )}
           <Form.Item
             name="quantity"
             label={`Quantity to Return (${selectedMaterial?.unit_of_measure})`}
@@ -695,6 +833,23 @@ export const WorkOrderDetail: React.FC = () => {
           style={{ marginBottom: 16 }}
         />
         <Form form={form} layout="vertical">
+          {((workOrder?.lot_holdings || []).filter((h) => h.product_id === selectedMaterial?.product_id).length > 0) && (
+            <Form.Item
+              name="lot_id"
+              label="Select Work Order Lot Holding"
+              tooltip="Specify which lot balance this scrap is attributed to."
+            >
+              <Select placeholder="Select holding lot (optional if unallocated)" allowClear>
+                {(workOrder?.lot_holdings || [])
+                  .filter((h) => h.product_id === selectedMaterial?.product_id)
+                  .map((h) => (
+                    <Option key={h.lot_id} value={h.lot_id} disabled={h.remaining_holding <= 0}>
+                      {h.lot_number || h.lot_id} — Holding: {h.remaining_holding} {h.unit_of_measure}
+                    </Option>
+                  ))}
+              </Select>
+            </Form.Item>
+          )}
           <Form.Item
             name="quantity"
             label={`Scrap Quantity (${selectedMaterial?.unit_of_measure})`}

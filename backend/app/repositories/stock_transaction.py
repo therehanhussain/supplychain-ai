@@ -23,6 +23,7 @@ class StockTransactionRepository(BaseRepository[StockTransaction]):
                 selectinload(StockTransaction.work_order),
                 selectinload(StockTransaction.employee),
                 selectinload(StockTransaction.performed_by_user),
+                selectinload(StockTransaction.lot),
             )
             .where(
                 StockTransaction.id == transaction_id,
@@ -39,6 +40,7 @@ class StockTransactionRepository(BaseRepository[StockTransaction]):
         warehouse_id: Optional[str] = None,
         work_order_id: Optional[str] = None,
         production_order_id: Optional[str] = None,
+        lot_id: Optional[str] = None,
         transaction_type: Optional[str] = None,
         skip: int = 0,
         limit: int = 100,
@@ -52,6 +54,7 @@ class StockTransactionRepository(BaseRepository[StockTransaction]):
                 selectinload(StockTransaction.work_order),
                 selectinload(StockTransaction.employee),
                 selectinload(StockTransaction.performed_by_user),
+                selectinload(StockTransaction.lot),
             )
             .where(StockTransaction.organization_id == organization_id)
         )
@@ -61,6 +64,8 @@ class StockTransactionRepository(BaseRepository[StockTransaction]):
             query = query.where(StockTransaction.product_id == product_id)
         if warehouse_id:
             query = query.where(StockTransaction.warehouse_id == warehouse_id)
+        if lot_id:
+            query = query.where(StockTransaction.lot_id == lot_id)
         if work_order_id:
             query = query.where(StockTransaction.work_order_id == work_order_id)
         if production_order_id:

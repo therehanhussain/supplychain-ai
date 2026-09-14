@@ -21,6 +21,7 @@ from backend.app.models.work_order import WorkOrder
 from backend.app.models.material_requirement import MaterialRequirement
 from backend.app.models.material_request import MaterialRequest
 from backend.app.models.stock_transaction import StockTransaction
+from backend.app.models.material_lot import MaterialLot, WorkOrderLotHolding
 
 __all__ = [
     "Base",
@@ -47,4 +48,6 @@ __all__ = [
     "MaterialRequirement",
     "MaterialRequest",
     "StockTransaction",
+    "MaterialLot",
+    "WorkOrderLotHolding",
 ]

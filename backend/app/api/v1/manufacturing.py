@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, status, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.database import get_db
+from backend.app.core.exceptions import AppException
 from backend.app.api.dependencies import get_tenant_context, get_auth_tenant_context, TenantContext
 from backend.app.services.material_service import MaterialTraceabilityService
 from backend.app.repositories.stock_transaction import StockTransactionRepository
@@ -31,6 +32,10 @@ from backend.app.schemas.manufacturing import (
     WastageMaterialRequest,
     WorkOrderDetailResponse,
     EmployeeDashboardStats,
+    MaterialLotReceive,
+    MaterialLotResponse,
+    WorkOrderLotHoldingResponse,
+    LotTraceabilityResponse,
 )
 
 router = APIRouter(tags=["Manufacturing & Material Traceability"])
@@ -154,6 +159,7 @@ async def list_stock_transactions(
     warehouse_id: Optional[str] = Query(None),
     work_order_id: Optional[str] = Query(None),
     production_order_id: Optional[str] = Query(None),
+    lot_id: Optional[str] = Query(None),
     transaction_type: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
@@ -168,6 +174,7 @@ async def list_stock_transactions(
         warehouse_id=warehouse_id,
         work_order_id=work_order_id,
         production_order_id=production_order_id,
+        lot_id=lot_id,
         transaction_type=transaction_type,
         skip=skip,
         limit=limit,
@@ -182,6 +189,8 @@ async def list_stock_transactions(
             product_name=tx.product.name if tx.product else None,
             warehouse_id=tx.warehouse_id,
             warehouse_code=tx.warehouse.code if tx.warehouse else None,
+            lot_id=tx.lot_id,
+            lot_number=tx.lot.lot_number if tx.lot else None,
             work_order_id=tx.work_order_id,
             production_order_id=tx.production_order_id,
             employee_id=tx.employee_id,
@@ -232,6 +241,8 @@ async def get_inventory_transactions(
             product_name=tx.product.name if tx.product else None,
             warehouse_id=tx.warehouse_id,
             warehouse_code=tx.warehouse.code if tx.warehouse else None,
+            lot_id=tx.lot_id,
+            lot_number=tx.lot.lot_number if tx.lot else None,
             work_order_id=tx.work_order_id,
             production_order_id=tx.production_order_id,
             employee_id=tx.employee_id,
@@ -477,6 +488,7 @@ async def consume_material(
     tx_payload = StockTransactionCreate(
         work_order_id=payload.work_order_id,
         product_id=payload.product_id,
+        lot_id=payload.lot_id,
         transaction_type=TransactionType.CONSUMPTION,
         quantity=payload.quantity,
         unit_of_measure=payload.unit_of_measure,
@@ -502,6 +514,7 @@ async def return_material(
     tx_payload = StockTransactionCreate(
         work_order_id=payload.work_order_id,
         product_id=payload.product_id,
+        lot_id=payload.lot_id,
         transaction_type=TransactionType.RETURN,
         quantity=payload.quantity,
         unit_of_measure=payload.unit_of_measure,
@@ -527,6 +540,7 @@ async def report_wastage(
     tx_payload = StockTransactionCreate(
         work_order_id=payload.work_order_id,
         product_id=payload.product_id,
+        lot_id=payload.lot_id,
         transaction_type=TransactionType.WASTAGE,
         quantity=payload.quantity,
         unit_of_measure=payload.unit_of_measure,
@@ -535,3 +549,86 @@ async def report_wastage(
         reference_id=payload.idempotency_key,
     )
     return await service.record_transaction(tx_payload)
+
+
+# ------------------------------------------------------------------------------
+# Phase 13.4: Lot / Batch Traceability Endpoints
+# ------------------------------------------------------------------------------
+
+@router.post(
+    "/lots/receive",
+    response_model=MaterialLotResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Receive raw material batch into specific lot (Admin / Storekeeper)",
+)
+async def receive_material_lot(
+    payload: MaterialLotReceive,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    if tenant.role != UserRole.ADMIN and tenant.role != "ADMIN":
+        raise AppException("Only storekeepers or administrators can receive inbound material lots.", 403, "FORBIDDEN")
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.receive_material_lot(payload)
+
+
+@router.get(
+    "/lots",
+    response_model=List[MaterialLotResponse],
+    summary="List material lots across facilities (Viewer+)",
+)
+async def list_lots(
+    product_id: Optional[str] = Query(None),
+    warehouse_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    tenant: TenantContext = Depends(get_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.list_lots(
+        product_id=product_id, warehouse_id=warehouse_id, status=status, skip=skip, limit=limit
+    )
+
+
+@router.get(
+    "/lots/{id}",
+    response_model=MaterialLotResponse,
+    summary="Get single lot details by ID (Viewer+)",
+)
+async def get_lot(
+    id: str,
+    tenant: TenantContext = Depends(get_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.get_lot(id)
+
+
+@router.get(
+    "/lots/{id}/traceability",
+    response_model=LotTraceabilityResponse,
+    summary="Get end-to-end multi-tier traceability report for specific lot (Viewer+)",
+)
+async def get_lot_traceability(
+    id: str,
+    tenant: TenantContext = Depends(get_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.get_lot_traceability(id)
+
+
+@router.get(
+    "/work-orders/{id}/lots",
+    response_model=List[WorkOrderLotHoldingResponse],
+    summary="List active lot holdings currently with a work order (Operator+)",
+)
+async def list_work_order_lots(
+    id: str,
+    tenant: TenantContext = Depends(get_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.list_work_order_lot_holdings(id)

@@ -23,6 +23,8 @@ from backend.app.models.work_order import WorkOrder
 from backend.app.models.material_requirement import MaterialRequirement
 from backend.app.models.material_request import MaterialRequest
 from backend.app.models.stock_transaction import StockTransaction
+from backend.app.models.material_lot import MaterialLot, WorkOrderLotHolding
+from backend.app.models.supplier import Supplier
 from backend.app.models.enums import TransactionType, UnitOfMeasure, ProductionOrderStatus, WorkOrderStatus
 from backend.app.models.user import User, UserRole
 
@@ -46,6 +48,12 @@ from backend.app.schemas.manufacturing import (
     MaterialRequestIssue,
     WorkOrderDetailResponse,
     EmployeeDashboardStats,
+    MaterialLotReceive,
+    MaterialLotResponse,
+    WorkOrderLotHoldingResponse,
+    LotTraceabilityResponse,
+    LotHoldingSummary,
+    LotTraceabilityMovement,
 )
 from datetime import datetime, timezone
 
@@ -399,6 +407,23 @@ class MaterialTraceabilityService:
             if not payload.reason or not payload.reason.strip():
                 raise AppException(f"Mandatory reason required for transaction type '{tx_type.value}'.", 400, "REASON_REQUIRED")
 
+        # Resolve lot if lot_id specified
+        lot: Optional[MaterialLot] = None
+        if payload.lot_id:
+            lot_res = await self.db.execute(
+                select(MaterialLot)
+                .where(
+                    MaterialLot.id == payload.lot_id,
+                    MaterialLot.organization_id == self.organization_id,
+                )
+                .with_for_update()
+            )
+            lot = lot_res.scalar_one_or_none()
+            if not lot:
+                raise AppException(f"Material lot '{payload.lot_id}' not found.", 404, "LOT_NOT_FOUND")
+            if lot.product_id != product.id:
+                raise AppException(f"Lot '{lot.lot_number}' does not match product '{product.sku}'.", 400, "LOT_PRODUCT_MISMATCH")
+
         # Handle Material Requirement link if work_order_id is specified
         requirement: Optional[MaterialRequirement] = None
         if payload.work_order_id:
@@ -434,6 +459,8 @@ class MaterialTraceabilityService:
         if tx_type == TransactionType.RECEIPT:
             # Material Store receives stock from supplier / inbound
             inventory.quantity = int(inventory.quantity + round(quantity))
+            if lot:
+                lot.current_quantity = round(lot.current_quantity + quantity, 4)
 
         elif tx_type == TransactionType.ISSUE:
             # Store issues material to Production / Employee
@@ -443,6 +470,15 @@ class MaterialTraceabilityService:
                     400,
                     "INSUFFICIENT_INVENTORY",
                 )
+            if lot:
+                if lot.current_quantity < quantity:
+                    raise AppException(
+                        f"Insufficient stock in lot '{lot.lot_number}'. Available: {lot.current_quantity}, Requested: {quantity}",
+                        400,
+                        "INSUFFICIENT_LOT_INVENTORY",
+                    )
+                lot.current_quantity = round(lot.current_quantity - quantity, 4)
+
             inventory.quantity = int(inventory.quantity - round(quantity))
 
             # Update requirement issued balance
@@ -459,6 +495,31 @@ class MaterialTraceabilityService:
                     unit_of_measure=payload.unit_of_measure or product.unit_of_measure,
                 )
                 self.db.add(requirement)
+
+            # Update WorkOrderLotHolding if lot and work_order_id specified
+            if lot and payload.work_order_id:
+                holding_res = await self.db.execute(
+                    select(WorkOrderLotHolding)
+                    .where(
+                        WorkOrderLotHolding.organization_id == self.organization_id,
+                        WorkOrderLotHolding.work_order_id == payload.work_order_id,
+                        WorkOrderLotHolding.lot_id == lot.id,
+                    )
+                    .with_for_update()
+                )
+                holding = holding_res.scalar_one_or_none()
+                if holding:
+                    holding.issued_quantity = round(holding.issued_quantity + quantity, 4)
+                else:
+                    holding = WorkOrderLotHolding(
+                        organization_id=self.organization_id,
+                        work_order_id=payload.work_order_id,
+                        lot_id=lot.id,
+                        product_id=product.id,
+                        issued_quantity=quantity,
+                        unit_of_measure=payload.unit_of_measure or product.unit_of_measure,
+                    )
+                    self.db.add(holding)
 
         elif tx_type == TransactionType.CONSUMPTION:
             # Production consumes from issued material
@@ -480,6 +541,25 @@ class MaterialTraceabilityService:
                     "EXCEEDS_ISSUED_HOLDING",
                 )
 
+            if lot:
+                holding_res = await self.db.execute(
+                    select(WorkOrderLotHolding)
+                    .where(
+                        WorkOrderLotHolding.organization_id == self.organization_id,
+                        WorkOrderLotHolding.work_order_id == payload.work_order_id,
+                        WorkOrderLotHolding.lot_id == lot.id,
+                    )
+                    .with_for_update()
+                )
+                holding = holding_res.scalar_one_or_none()
+                if not holding or holding.remaining_holding < quantity:
+                    raise AppException(
+                        f"Consumption exceeds issued holding for lot '{lot.lot_number}'. Available holding: {holding.remaining_holding if holding else 0}, Requested: {quantity}",
+                        400,
+                        "EXCEEDS_LOT_HOLDING",
+                    )
+                holding.consumed_quantity = round(holding.consumed_quantity + quantity, 4)
+
             # Store inventory is NOT decreased again (was already decreased upon ISSUE)
             requirement.consumed_quantity += quantity
 
@@ -493,7 +573,31 @@ class MaterialTraceabilityService:
                         400,
                         "EXCEEDS_ISSUED_HOLDING",
                     )
+
+            if lot and payload.work_order_id:
+                holding_res = await self.db.execute(
+                    select(WorkOrderLotHolding)
+                    .where(
+                        WorkOrderLotHolding.organization_id == self.organization_id,
+                        WorkOrderLotHolding.work_order_id == payload.work_order_id,
+                        WorkOrderLotHolding.lot_id == lot.id,
+                    )
+                    .with_for_update()
+                )
+                holding = holding_res.scalar_one_or_none()
+                if not holding or holding.remaining_holding < quantity:
+                    raise AppException(
+                        f"Return exceeds issued holding for lot '{lot.lot_number}'. Available holding: {holding.remaining_holding if holding else 0}, Attempted return: {quantity}",
+                        400,
+                        "EXCEEDS_LOT_HOLDING",
+                    )
+                holding.returned_quantity = round(holding.returned_quantity + quantity, 4)
+
+            if requirement:
                 requirement.returned_quantity += quantity
+
+            if lot:
+                lot.current_quantity = round(lot.current_quantity + quantity, 4)
 
             # Store inventory increases
             inventory.quantity = int(inventory.quantity + round(quantity))
@@ -508,6 +612,27 @@ class MaterialTraceabilityService:
                         400,
                         "EXCEEDS_ISSUED_HOLDING",
                     )
+
+            if lot and payload.work_order_id:
+                holding_res = await self.db.execute(
+                    select(WorkOrderLotHolding)
+                    .where(
+                        WorkOrderLotHolding.organization_id == self.organization_id,
+                        WorkOrderLotHolding.work_order_id == payload.work_order_id,
+                        WorkOrderLotHolding.lot_id == lot.id,
+                    )
+                    .with_for_update()
+                )
+                holding = holding_res.scalar_one_or_none()
+                if not holding or holding.remaining_holding < quantity:
+                    raise AppException(
+                        f"Wastage exceeds issued holding for lot '{lot.lot_number}'. Available holding: {holding.remaining_holding if holding else 0}, Reported: {quantity}",
+                        400,
+                        "EXCEEDS_LOT_HOLDING",
+                    )
+                holding.wastage_quantity = round(holding.wastage_quantity + quantity, 4)
+
+            if requirement:
                 requirement.wastage_quantity += quantity
             else:
                 # Warehouse store loss
@@ -517,6 +642,14 @@ class MaterialTraceabilityService:
                         400,
                         "INSUFFICIENT_INVENTORY",
                     )
+                if lot:
+                    if lot.current_quantity < quantity:
+                        raise AppException(
+                            f"Wastage cannot exceed available lot inventory: {lot.current_quantity}.",
+                            400,
+                            "INSUFFICIENT_LOT_INVENTORY",
+                        )
+                    lot.current_quantity = round(lot.current_quantity - quantity, 4)
                 inventory.quantity = int(inventory.quantity - round(quantity))
 
         elif tx_type in (TransactionType.DAMAGE, TransactionType.EXPIRY):
@@ -559,6 +692,7 @@ class MaterialTraceabilityService:
             inventory_id=inventory.id,
             product_id=product.id,
             warehouse_id=warehouse.id,
+            lot_id=lot.id if lot else payload.lot_id,
             work_order_id=payload.work_order_id,
             production_order_id=payload.production_order_id,
             employee_id=payload.employee_id or self.user_id,
@@ -604,6 +738,8 @@ class MaterialTraceabilityService:
             product_name=product.name,
             warehouse_id=tx.warehouse_id,
             warehouse_code=warehouse.code,
+            lot_id=tx.lot_id,
+            lot_number=lot.lot_number if lot else None,
             work_order_id=tx.work_order_id,
             production_order_id=tx.production_order_id,
             employee_id=tx.employee_id,
@@ -978,6 +1114,7 @@ class MaterialTraceabilityService:
             product_sku=prod.sku if prod else None,
             product_name=prod.name if prod else None,
             materials=materials,
+            lot_holdings=await self.list_work_order_lot_holdings(w.id),
         )
 
     async def get_work_order_materials(self, work_order_id: str, is_admin: bool = False) -> List[MaterialRequirementResponse]:
@@ -1395,6 +1532,7 @@ class MaterialTraceabilityService:
             work_order_id=req.work_order_id,
             product_id=req.product_id,
             warehouse_id=warehouse_id,
+            lot_id=(payload and payload.lot_id) or None,
             transaction_type=TransactionType.ISSUE,
             quantity=req.quantity,
             unit_of_measure=req.unit_of_measure or (req.product.unit_of_measure if req.product else "kg"),
@@ -1515,4 +1653,424 @@ class MaterialTraceabilityService:
             today_returned_qty=round(returned_sum, 2),
             today_wastage_qty=round(wastage_sum, 2),
             unit="kg / units",
+        )
+
+    # --------------------------------------------------------------------------
+    # Phase 13.4: Material Lot / Batch Operations & Traceability
+    # --------------------------------------------------------------------------
+
+    async def receive_material_lot(self, payload: MaterialLotReceive) -> MaterialLotResponse:
+        """Atomic receipt of material against a specific lot."""
+        if payload.quantity <= 0:
+            raise AppException("Receipt quantity must be strictly greater than zero.", 400, "INVALID_QUANTITY")
+
+        # Resolve product
+        prod_res = await self.db.execute(
+            select(Product).where(
+                Product.organization_id == self.organization_id,
+                (Product.id == payload.product_id) | (Product.sku == payload.product_id),
+            )
+        )
+        product = prod_res.scalar_one_or_none()
+        if not product:
+            raise AppException(f"Product '{payload.product_id}' not found.", 404, "PRODUCT_NOT_FOUND")
+
+        # Resolve warehouse
+        wh_res = await self.db.execute(
+            select(Warehouse).where(
+                Warehouse.organization_id == self.organization_id,
+                (Warehouse.id == payload.warehouse_id) | (Warehouse.code == payload.warehouse_id),
+            )
+        )
+        warehouse = wh_res.scalar_one_or_none()
+        if not warehouse:
+            raise AppException(f"Warehouse '{payload.warehouse_id}' not found.", 404, "WAREHOUSE_NOT_FOUND")
+
+        # Resolve supplier if provided
+        supplier: Optional[Supplier] = None
+        if payload.supplier_id:
+            sup_res = await self.db.execute(
+                select(Supplier).where(
+                    Supplier.organization_id == self.organization_id,
+                    (Supplier.id == payload.supplier_id) | (Supplier.name == payload.supplier_id),
+                )
+            )
+            supplier = sup_res.scalar_one_or_none()
+            if not supplier:
+                raise AppException(f"Supplier '{payload.supplier_id}' not found.", 404, "SUPPLIER_NOT_FOUND")
+
+        # Check existing lot by (organization_id, product_id, lot_number)
+        lot_res = await self.db.execute(
+            select(MaterialLot)
+            .where(
+                MaterialLot.organization_id == self.organization_id,
+                MaterialLot.product_id == product.id,
+                MaterialLot.lot_number == payload.lot_number,
+            )
+            .with_for_update()
+        )
+        lot = lot_res.scalar_one_or_none()
+        if lot:
+            lot.received_quantity = round(lot.received_quantity + payload.quantity, 4)
+            lot.current_quantity = round(lot.current_quantity + payload.quantity, 4)
+            if warehouse:
+                lot.warehouse_id = warehouse.id
+            if supplier:
+                lot.supplier_id = supplier.id
+            if payload.expiry_at:
+                lot.expiry_at = payload.expiry_at
+            if payload.manufacturing_date:
+                lot.manufacturing_date = payload.manufacturing_date
+            if payload.notes:
+                lot.notes = f"{lot.notes or ''}\n{payload.notes}".strip()
+        else:
+            lot = MaterialLot(
+                organization_id=self.organization_id,
+                product_id=product.id,
+                warehouse_id=warehouse.id,
+                supplier_id=supplier.id if supplier else None,
+                lot_number=payload.lot_number,
+                received_quantity=payload.quantity,
+                current_quantity=payload.quantity,
+                unit_of_measure=payload.unit_of_measure or product.unit_of_measure or "kg",
+                status="ACTIVE",
+                received_at=datetime.now(timezone.utc),
+                expiry_at=payload.expiry_at,
+                manufacturing_date=payload.manufacturing_date,
+                notes=payload.notes,
+            )
+            self.db.add(lot)
+            await self.db.flush()
+
+        # Update Inventory aggregate
+        inv_res = await self.db.execute(
+            select(Inventory)
+            .where(
+                Inventory.organization_id == self.organization_id,
+                Inventory.warehouse_id == warehouse.id,
+                Inventory.product_id == product.id,
+            )
+            .with_for_update()
+        )
+        inventory = inv_res.scalar_one_or_none()
+        if not inventory:
+            inventory = Inventory(
+                organization_id=self.organization_id,
+                warehouse_id=warehouse.id,
+                product_id=product.id,
+                quantity=0,
+                safety_stock=50,
+                reorder_point=100,
+                reorder_quantity=200,
+            )
+            self.db.add(inventory)
+            await self.db.flush()
+
+        inventory.quantity = int(inventory.quantity + round(payload.quantity))
+
+        # Record StockTransaction for receipt
+        tx = StockTransaction(
+            organization_id=self.organization_id,
+            inventory_id=inventory.id,
+            product_id=product.id,
+            warehouse_id=warehouse.id,
+            lot_id=lot.id,
+            performed_by_user_id=self.user_id,
+            transaction_type=TransactionType.RECEIPT,
+            quantity=payload.quantity,
+            unit_of_measure=payload.unit_of_measure or product.unit_of_measure or "kg",
+            reason=f"Received inbound stock into lot {lot.lot_number}",
+            source_location=supplier.name if supplier else "Supplier Inbound",
+            destination_location=warehouse.code,
+            reference_type="LOT_RECEIPT",
+            reference_id=lot.lot_number,
+            notes=payload.notes,
+        )
+        self.db.add(tx)
+
+        # AuditLog
+        audit = AuditLog(
+            organization_id=self.organization_id,
+            user_id=self.user_id,
+            action="LOT_RECEIVED",
+            entity_type="MaterialLot",
+            entity_id=lot.id,
+            details=f"Lot={lot.lot_number}, Qty={payload.quantity} {lot.unit_of_measure}, SKU={product.sku}, WH={warehouse.code}, Supplier={supplier.name if supplier else 'None'}",
+        )
+        self.db.add(audit)
+
+        await self.db.commit()
+        await self.db.refresh(lot)
+
+        return MaterialLotResponse(
+            id=lot.id,
+            organization_id=lot.organization_id,
+            product_id=lot.product_id,
+            product_sku=product.sku,
+            product_name=product.name,
+            warehouse_id=lot.warehouse_id,
+            warehouse_code=warehouse.code,
+            supplier_id=lot.supplier_id,
+            supplier_name=supplier.name if supplier else None,
+            lot_number=lot.lot_number,
+            received_quantity=lot.received_quantity,
+            current_quantity=lot.current_quantity,
+            unit_of_measure=lot.unit_of_measure,
+            status=lot.status,
+            received_at=lot.received_at,
+            expiry_at=lot.expiry_at,
+            manufacturing_date=lot.manufacturing_date,
+            notes=lot.notes,
+            created_at=lot.created_at,
+            updated_at=lot.updated_at,
+        )
+
+    async def list_lots(
+        self,
+        product_id: Optional[str] = None,
+        warehouse_id: Optional[str] = None,
+        status: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[MaterialLotResponse]:
+        """List material lots for tenant organization."""
+        query = (
+            select(MaterialLot)
+            .options(
+                selectinload(MaterialLot.product),
+                selectinload(MaterialLot.warehouse),
+                selectinload(MaterialLot.supplier),
+            )
+            .where(MaterialLot.organization_id == self.organization_id)
+        )
+        if product_id:
+            query = query.where(
+                (MaterialLot.product_id == product_id)
+                | (MaterialLot.product.has(Product.sku == product_id))
+            )
+        if warehouse_id:
+            query = query.where(
+                (MaterialLot.warehouse_id == warehouse_id)
+                | (MaterialLot.warehouse.has(Warehouse.code == warehouse_id))
+            )
+        if status:
+            query = query.where(MaterialLot.status == status)
+
+        query = query.order_by(MaterialLot.created_at.desc()).offset(skip).limit(limit)
+        res = await self.db.execute(query)
+        lots = res.scalars().all()
+
+        return [
+            MaterialLotResponse(
+                id=l.id,
+                organization_id=l.organization_id,
+                product_id=l.product_id,
+                product_sku=l.product.sku if l.product else None,
+                product_name=l.product.name if l.product else None,
+                warehouse_id=l.warehouse_id,
+                warehouse_code=l.warehouse.code if l.warehouse else None,
+                supplier_id=l.supplier_id,
+                supplier_name=l.supplier.name if l.supplier else None,
+                lot_number=l.lot_number,
+                received_quantity=l.received_quantity,
+                current_quantity=l.current_quantity,
+                unit_of_measure=l.unit_of_measure,
+                status=l.status,
+                received_at=l.received_at,
+                expiry_at=l.expiry_at,
+                manufacturing_date=l.manufacturing_date,
+                notes=l.notes,
+                created_at=l.created_at,
+                updated_at=l.updated_at,
+            )
+            for l in lots
+        ]
+
+    async def get_lot(self, lot_id: str) -> MaterialLotResponse:
+        """Fetch single lot by ID for tenant."""
+        query = (
+            select(MaterialLot)
+            .options(
+                selectinload(MaterialLot.product),
+                selectinload(MaterialLot.warehouse),
+                selectinload(MaterialLot.supplier),
+            )
+            .where(
+                MaterialLot.id == lot_id,
+                MaterialLot.organization_id == self.organization_id,
+            )
+        )
+        res = await self.db.execute(query)
+        l = res.scalar_one_or_none()
+        if not l:
+            raise AppException(f"Material lot '{lot_id}' not found.", 404, "LOT_NOT_FOUND")
+
+        return MaterialLotResponse(
+            id=l.id,
+            organization_id=l.organization_id,
+            product_id=l.product_id,
+            product_sku=l.product.sku if l.product else None,
+            product_name=l.product.name if l.product else None,
+            warehouse_id=l.warehouse_id,
+            warehouse_code=l.warehouse.code if l.warehouse else None,
+            supplier_id=l.supplier_id,
+            supplier_name=l.supplier.name if l.supplier else None,
+            lot_number=l.lot_number,
+            received_quantity=l.received_quantity,
+            current_quantity=l.current_quantity,
+            unit_of_measure=l.unit_of_measure,
+            status=l.status,
+            received_at=l.received_at,
+            expiry_at=l.expiry_at,
+            manufacturing_date=l.manufacturing_date,
+            notes=l.notes,
+            created_at=l.created_at,
+            updated_at=l.updated_at,
+        )
+
+    async def list_work_order_lot_holdings(self, work_order_id: str) -> List[WorkOrderLotHoldingResponse]:
+        """List active lot holding balances currently with a work order."""
+        query = (
+            select(WorkOrderLotHolding)
+            .options(
+                selectinload(WorkOrderLotHolding.lot),
+                selectinload(WorkOrderLotHolding.product),
+            )
+            .where(
+                WorkOrderLotHolding.organization_id == self.organization_id,
+                WorkOrderLotHolding.work_order_id == work_order_id,
+            )
+            .order_by(WorkOrderLotHolding.created_at.asc())
+        )
+        res = await self.db.execute(query)
+        holdings = res.scalars().all()
+
+        return [
+            WorkOrderLotHoldingResponse(
+                id=h.id,
+                organization_id=h.organization_id,
+                work_order_id=h.work_order_id,
+                lot_id=h.lot_id,
+                lot_number=h.lot.lot_number if h.lot else None,
+                product_id=h.product_id,
+                product_sku=h.product.sku if h.product else None,
+                product_name=h.product.name if h.product else None,
+                issued_quantity=h.issued_quantity,
+                consumed_quantity=h.consumed_quantity,
+                returned_quantity=h.returned_quantity,
+                wastage_quantity=h.wastage_quantity,
+                remaining_holding=h.remaining_holding,
+                unit_of_measure=h.unit_of_measure,
+            )
+            for h in holdings
+        ]
+
+    async def get_lot_traceability(self, lot_id: str) -> LotTraceabilityResponse:
+        """End-to-end multi-tier traceability timeline for a specific lot."""
+        query = (
+            select(MaterialLot)
+            .options(
+                selectinload(MaterialLot.product),
+                selectinload(MaterialLot.warehouse),
+                selectinload(MaterialLot.supplier),
+            )
+            .where(
+                MaterialLot.id == lot_id,
+                MaterialLot.organization_id == self.organization_id,
+            )
+        )
+        res = await self.db.execute(query)
+        lot = res.scalar_one_or_none()
+        if not lot:
+            raise AppException(f"Material lot '{lot_id}' not found.", 404, "LOT_NOT_FOUND")
+
+        # Fetch WorkOrderLotHoldings for this lot
+        hold_res = await self.db.execute(
+            select(WorkOrderLotHolding)
+            .options(selectinload(WorkOrderLotHolding.work_order))
+            .where(
+                WorkOrderLotHolding.lot_id == lot.id,
+                WorkOrderLotHolding.organization_id == self.organization_id,
+            )
+        )
+        holdings = hold_res.scalars().all()
+
+        # Fetch all transactions linked to this lot
+        tx_res = await self.db.execute(
+            select(StockTransaction)
+            .options(
+                selectinload(StockTransaction.work_order),
+                selectinload(StockTransaction.warehouse),
+                selectinload(StockTransaction.performed_by_user),
+            )
+            .where(
+                StockTransaction.lot_id == lot.id,
+                StockTransaction.organization_id == self.organization_id,
+            )
+            .order_by(StockTransaction.created_at.asc())
+        )
+        txs = tx_res.scalars().all()
+
+        # Compute totals
+        total_issued = sum(t.quantity for t in txs if t.transaction_type == TransactionType.ISSUE)
+        total_consumed = sum(t.quantity for t in txs if t.transaction_type == TransactionType.CONSUMPTION)
+        total_returned = sum(t.quantity for t in txs if t.transaction_type == TransactionType.RETURN)
+        total_wasted = sum(t.quantity for t in txs if t.transaction_type == TransactionType.WASTAGE)
+        total_holding = sum(h.remaining_holding for h in holdings)
+
+        work_order_summaries = [
+            LotHoldingSummary(
+                work_order_id=h.work_order_id,
+                work_order_number=h.work_order.work_order_number if h.work_order else "WO-N/A",
+                issued_quantity=h.issued_quantity,
+                consumed_quantity=h.consumed_quantity,
+                returned_quantity=h.returned_quantity,
+                wastage_quantity=h.wastage_quantity,
+                remaining_holding=h.remaining_holding,
+                unit_of_measure=h.unit_of_measure,
+            )
+            for h in holdings
+        ]
+
+        movements = [
+            LotTraceabilityMovement(
+                transaction_id=t.id,
+                timestamp=t.created_at,
+                transaction_type=t.transaction_type.value if hasattr(t.transaction_type, 'value') else str(t.transaction_type),
+                quantity=t.quantity,
+                unit_of_measure=t.unit_of_measure,
+                who=t.performed_by_user.full_name if t.performed_by_user else "System",
+                warehouse=t.warehouse.code if t.warehouse else None,
+                work_order_id=t.work_order_id,
+                work_order_number=t.work_order.work_order_number if t.work_order else None,
+                reason=t.reason,
+                reference=f"{t.reference_type or ''}:{t.reference_id or ''}".strip(":"),
+                notes=t.notes,
+            )
+            for t in txs
+        ]
+
+        return LotTraceabilityResponse(
+            lot_id=lot.id,
+            lot_number=lot.lot_number,
+            product_id=lot.product_id,
+            product_sku=lot.product.sku if lot.product else "N/A",
+            product_name=lot.product.name if lot.product else "N/A",
+            supplier_id=lot.supplier_id,
+            supplier_name=lot.supplier.name if lot.supplier else None,
+            warehouse_id=lot.warehouse_id,
+            warehouse_code=lot.warehouse.code if lot.warehouse else None,
+            status=lot.status,
+            received_at=lot.received_at,
+            expiry_at=lot.expiry_at,
+            initial_received_quantity=lot.received_quantity,
+            current_warehouse_balance=lot.current_quantity,
+            total_issued_to_work_orders=round(total_issued, 4),
+            total_consumed_in_production=round(total_consumed, 4),
+            total_returned_to_warehouse=round(total_returned, 4),
+            total_scrapped_or_wasted=round(total_wasted, 4),
+            total_current_floor_holding=round(total_holding, 4),
+            unit_of_measure=lot.unit_of_measure,
+            work_order_holdings=work_order_summaries,
+            movement_history=movements,
         )

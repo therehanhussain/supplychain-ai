@@ -118,6 +118,7 @@ class StockTransactionCreate(BaseModel):
     transaction_type: TransactionType
     quantity: float = Field(..., gt=0.0, description="Movement quantity (strictly positive)")
     unit_of_measure: Optional[str] = "piece"
+    lot_id: Optional[str] = None
     work_order_id: Optional[str] = None
     production_order_id: Optional[str] = None
     employee_id: Optional[str] = None
@@ -155,6 +156,8 @@ class StockTransactionResponse(BaseModel):
     product_name: Optional[str] = None
     warehouse_id: str
     warehouse_code: Optional[str] = None
+    lot_id: Optional[str] = None
+    lot_number: Optional[str] = None
     work_order_id: Optional[str] = None
     production_order_id: Optional[str] = None
     employee_id: Optional[str] = None
@@ -259,6 +262,7 @@ class MaterialRequestReject(BaseModel):
 
 class MaterialRequestIssue(BaseModel):
     warehouse_id: Optional[str] = None
+    lot_id: Optional[str] = None
     idempotency_key: Optional[str] = None
     notes: Optional[str] = None
 
@@ -271,6 +275,7 @@ class ConsumeMaterialRequest(BaseModel):
     work_order_id: str
     product_id: str
     quantity: float = Field(..., gt=0.0)
+    lot_id: Optional[str] = None
     unit_of_measure: Optional[str] = "kg"
     reason: Optional[str] = "Production assembly"
     notes: Optional[str] = None
@@ -281,6 +286,7 @@ class ReturnMaterialRequest(BaseModel):
     work_order_id: str
     product_id: str
     quantity: float = Field(..., gt=0.0)
+    lot_id: Optional[str] = None
     unit_of_measure: Optional[str] = "kg"
     reason: Optional[str] = "Surplus material returned"
     notes: Optional[str] = None
@@ -291,10 +297,131 @@ class WastageMaterialRequest(BaseModel):
     work_order_id: str
     product_id: str
     quantity: float = Field(..., gt=0.0)
+    lot_id: Optional[str] = None
     unit_of_measure: Optional[str] = "kg"
     reason: str = Field(..., min_length=2, description="Mandatory scrap/wastage rationale")
     notes: Optional[str] = None
     idempotency_key: Optional[str] = None
+
+
+# ------------------------------------------------------------------------------
+# Material Lot / Batch Schemas (Phase 13.4)
+# ------------------------------------------------------------------------------
+
+class MaterialLotBase(BaseModel):
+    product_id: str = Field(..., json_schema_extra={"example": "prod-uuid-001"})
+    warehouse_id: Optional[str] = None
+    supplier_id: Optional[str] = None
+    lot_number: str = Field(..., min_length=1, max_length=100, json_schema_extra={"example": "LOT-2026-001"})
+    unit_of_measure: Optional[str] = "kg"
+    notes: Optional[str] = None
+
+
+class MaterialLotCreate(MaterialLotBase):
+    received_quantity: float = Field(..., gt=0.0)
+    expiry_at: Optional[datetime] = None
+    manufacturing_date: Optional[datetime] = None
+
+
+class MaterialLotReceive(BaseModel):
+    product_id: str = Field(..., json_schema_extra={"example": "prod-uuid-001"})
+    warehouse_id: str = Field(..., json_schema_extra={"example": "wh-uuid-001"})
+    lot_number: str = Field(..., min_length=1, max_length=100, json_schema_extra={"example": "LOT-2026-001"})
+    quantity: float = Field(..., gt=0.0)
+    unit_of_measure: Optional[str] = "kg"
+    supplier_id: Optional[str] = None
+    expiry_at: Optional[datetime] = None
+    manufacturing_date: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+class MaterialLotResponse(MaterialLotBase):
+    id: str
+    organization_id: str
+    product_sku: Optional[str] = None
+    product_name: Optional[str] = None
+    warehouse_code: Optional[str] = None
+    supplier_name: Optional[str] = None
+    received_quantity: float
+    current_quantity: float
+    status: str
+    received_at: datetime
+    expiry_at: Optional[datetime] = None
+    manufacturing_date: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class WorkOrderLotHoldingResponse(BaseModel):
+    id: str
+    organization_id: str
+    work_order_id: str
+    lot_id: str
+    lot_number: Optional[str] = None
+    product_id: str
+    product_sku: Optional[str] = None
+    product_name: Optional[str] = None
+    issued_quantity: float
+    consumed_quantity: float
+    returned_quantity: float
+    wastage_quantity: float
+    remaining_holding: float
+    unit_of_measure: str
+
+    model_config = {"from_attributes": True}
+
+
+class LotTraceabilityMovement(BaseModel):
+    transaction_id: str
+    timestamp: datetime
+    transaction_type: str
+    quantity: float
+    unit_of_measure: str
+    who: str
+    warehouse: Optional[str] = None
+    work_order_id: Optional[str] = None
+    work_order_number: Optional[str] = None
+    reason: Optional[str] = None
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class LotHoldingSummary(BaseModel):
+    work_order_id: str
+    work_order_number: str
+    issued_quantity: float
+    consumed_quantity: float
+    returned_quantity: float
+    wastage_quantity: float
+    remaining_holding: float
+    unit_of_measure: str
+
+
+class LotTraceabilityResponse(BaseModel):
+    lot_id: str
+    lot_number: str
+    product_id: str
+    product_sku: str
+    product_name: str
+    supplier_id: Optional[str] = None
+    supplier_name: Optional[str] = None
+    warehouse_id: Optional[str] = None
+    warehouse_code: Optional[str] = None
+    status: str
+    received_at: datetime
+    expiry_at: Optional[datetime] = None
+    initial_received_quantity: float
+    current_warehouse_balance: float
+    total_issued_to_work_orders: float
+    total_consumed_in_production: float
+    total_returned_to_warehouse: float
+    total_scrapped_or_wasted: float
+    total_current_floor_holding: float
+    unit_of_measure: str
+    work_order_holdings: List[LotHoldingSummary] = []
+    movement_history: List[LotTraceabilityMovement] = []
 
 
 # ------------------------------------------------------------------------------
@@ -309,6 +436,7 @@ class WorkOrderDetailResponse(WorkOrderResponse):
     assigned_user_name: Optional[str] = None
     warehouse_code: Optional[str] = None
     materials: List[MaterialRequirementResponse] = []
+    lot_holdings: List[WorkOrderLotHoldingResponse] = []
 
 
 class EmployeeDashboardStats(BaseModel):

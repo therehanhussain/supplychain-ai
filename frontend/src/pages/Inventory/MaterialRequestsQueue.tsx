@@ -57,6 +57,8 @@ export const MaterialRequestsQueue: React.FC = () => {
   const [issueModalVisible, setIssueModalVisible] = useState<boolean>(false);
   const [selectedRequest, setSelectedRequest] = useState<MaterialRequestItem | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
+  const [availableLots, setAvailableLots] = useState<any[]>([]);
+  const [loadingLots, setLoadingLots] = useState<boolean>(false);
 
   const [rejectForm] = Form.useForm();
   const [issueForm] = Form.useForm();
@@ -135,10 +137,21 @@ export const MaterialRequestsQueue: React.FC = () => {
   };
 
   // Issue action
-  const handleOpenIssue = (record: MaterialRequestItem) => {
+  const handleOpenIssue = async (record: MaterialRequestItem) => {
     setSelectedRequest(record);
     issueForm.resetFields();
+    setAvailableLots([]);
     setIssueModalVisible(true);
+    setLoadingLots(true);
+    try {
+      const lotsRes = await controlTowerApi.listLots(record.product_id, undefined, 'ACTIVE');
+      setAvailableLots(lotsRes.data || []);
+    } catch {
+      // Fallback gracefully if lot query fails
+      setAvailableLots([]);
+    } finally {
+      setLoadingLots(false);
+    }
   };
 
   const handleConfirmIssue = async () => {
@@ -149,6 +162,7 @@ export const MaterialRequestsQueue: React.FC = () => {
       const idempotencyKey = `issue_req_${selectedRequest.id}_${Date.now()}`;
       await controlTowerApi.issueMaterialRequest(selectedRequest.id, {
         warehouse_id: values.warehouse_id,
+        lot_id: values.lot_id || undefined,
         idempotency_key: idempotencyKey,
         notes: values.notes,
       });
@@ -542,6 +556,29 @@ export const MaterialRequestsQueue: React.FC = () => {
           </Row>
         </div>
         <Form form={issueForm} layout="vertical">
+          <Form.Item
+            name="lot_id"
+            label="Specific Warehouse Lot / Batch (Recommended for Traceability)"
+            tooltip="Selecting a lot assigns material directly from that lot, establishing lot-level traceability through production."
+          >
+            <Select
+              placeholder="Select warehouse lot (optional but recommended)"
+              allowClear
+              loading={loadingLots}
+              notFoundContent={loadingLots ? "Loading lots..." : "No active lots found for this product"}
+            >
+              {availableLots.map((l: any) => {
+                const isInsufficient = l.current_quantity < (selectedRequest?.quantity || 0);
+                return (
+                  <Option key={l.id} value={l.id} disabled={isInsufficient}>
+                    {l.lot_number} — Available: {l.current_quantity} {l.unit_of_measure}
+                    {l.supplier_name ? ` (${l.supplier_name})` : ''}
+                    {isInsufficient ? ' [Insufficient Balance]' : ''}
+                  </Option>
+                );
+              })}
+            </Select>
+          </Form.Item>
           <Form.Item name="notes" label="Storekeeper Dispatch Notes (Optional)">
             <Input.TextArea rows={2} placeholder="e.g. Dispatched from Bay 4B via forklift" />
           </Form.Item>

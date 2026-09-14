@@ -62,6 +62,100 @@ export interface WorkOrderDetailItem {
   product_sku?: string;
   product_name?: string;
   materials: MaterialRequirementItem[];
+  lot_holdings?: WorkOrderLotHoldingItem[];
+}
+
+// -----------------------------------------------------------------------------
+// Phase 13.4: Lot / Batch Traceability Models
+// -----------------------------------------------------------------------------
+
+export interface MaterialLotItem {
+  id: string;
+  organization_id: string;
+  product_id: string;
+  product_sku?: string;
+  product_name?: string;
+  warehouse_id: string;
+  warehouse_code?: string;
+  supplier_id?: string;
+  supplier_name?: string;
+  lot_number: string;
+  received_quantity: number;
+  current_quantity: number;
+  unit_of_measure: string;
+  status: string;
+  received_at: string;
+  expiry_at?: string;
+  manufacturing_date?: string;
+  notes?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface WorkOrderLotHoldingItem {
+  id: string;
+  organization_id: string;
+  work_order_id: string;
+  lot_id: string;
+  lot_number?: string;
+  product_id: string;
+  product_sku?: string;
+  product_name?: string;
+  issued_quantity: number;
+  consumed_quantity: number;
+  returned_quantity: number;
+  wastage_quantity: number;
+  remaining_holding: number;
+  unit_of_measure: string;
+}
+
+export interface LotTraceabilityMovement {
+  transaction_id: string;
+  timestamp: string;
+  transaction_type: string;
+  quantity: number;
+  unit_of_measure: string;
+  who: string;
+  warehouse?: string;
+  work_order_id?: string;
+  work_order_number?: string;
+  reason?: string;
+  reference?: string;
+  notes?: string;
+}
+
+export interface LotTraceabilityReport {
+  lot_id: string;
+  lot_number: string;
+  product_id: string;
+  product_sku: string;
+  product_name: string;
+  supplier_id?: string;
+  supplier_name?: string;
+  warehouse_id: string;
+  warehouse_code?: string;
+  status: string;
+  received_at: string;
+  expiry_at?: string;
+  initial_received_quantity: number;
+  current_warehouse_balance: number;
+  total_issued_to_work_orders: number;
+  total_consumed_in_production: number;
+  total_returned_to_warehouse: number;
+  total_scrapped_or_wasted: number;
+  total_current_floor_holding: number;
+  unit_of_measure: string;
+  work_order_holdings: {
+    work_order_id: string;
+    work_order_number: string;
+    issued_quantity: number;
+    consumed_quantity: number;
+    returned_quantity: number;
+    wastage_quantity: number;
+    remaining_holding: number;
+    unit_of_measure: string;
+  }[];
+  movement_history: LotTraceabilityMovement[];
 }
 
 export interface MaterialRequestItem {
@@ -567,6 +661,7 @@ class ControlTowerApiService {
   async consumeMaterial(payload: {
     work_order_id: string;
     product_id: string;
+    lot_id?: string;
     quantity: number;
     unit_of_measure?: string;
     reason?: string;
@@ -579,6 +674,7 @@ class ControlTowerApiService {
   async returnMaterial(payload: {
     work_order_id: string;
     product_id: string;
+    lot_id?: string;
     quantity: number;
     unit_of_measure?: string;
     reason?: string;
@@ -591,6 +687,7 @@ class ControlTowerApiService {
   async reportWastage(payload: {
     work_order_id: string;
     product_id: string;
+    lot_id?: string;
     quantity: number;
     unit_of_measure?: string;
     reason: string;
@@ -639,8 +736,68 @@ class ControlTowerApiService {
     return await apiClient.post(`/api/v1/manufacturing/material-requests/${id}/reject`, { reason, notes });
   }
 
-  async issueMaterialRequest(id: string, payload?: { warehouse_id?: string; idempotency_key?: string; notes?: string }): Promise<any> {
+  async issueMaterialRequest(id: string, payload?: { warehouse_id?: string; lot_id?: string; idempotency_key?: string; notes?: string }): Promise<any> {
     return await apiClient.post(`/api/v1/manufacturing/material-requests/${id}/issue`, payload || {});
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 13.4: Lot / Batch Traceability API
+  // ---------------------------------------------------------------------------
+
+  async listLots(productId?: string, warehouseId?: string, status?: string): Promise<ProvenanceEnvelope<MaterialLotItem[]>> {
+    try {
+      const params = new URLSearchParams();
+      if (productId) params.append('product_id', productId);
+      if (warehouseId) params.append('warehouse_id', warehouseId);
+      if (status) params.append('status', status);
+      const queryString = params.toString();
+      const url = `/api/v1/manufacturing/lots${queryString ? `?${queryString}` : ''}`;
+      const items = await apiClient.get<MaterialLotItem[]>(url);
+      return { data: items || [], provenance: 'LIVE', sourceNote: 'Material Lots Database' };
+    } catch {
+      return { data: [], provenance: 'FALLBACK', sourceNote: 'Lots offline' };
+    }
+  }
+
+  async getLot(id: string): Promise<ProvenanceEnvelope<MaterialLotItem | null>> {
+    try {
+      const item = await apiClient.get<MaterialLotItem>(`/api/v1/manufacturing/lots/${id}`);
+      return { data: item, provenance: 'LIVE', sourceNote: 'Lot Details' };
+    } catch {
+      return { data: null, provenance: 'FALLBACK', sourceNote: 'Lot details offline' };
+    }
+  }
+
+  async receiveLot(payload: {
+    product_id: string;
+    warehouse_id: string;
+    supplier_id?: string;
+    lot_number: string;
+    quantity: number;
+    unit_of_measure?: string;
+    expiry_at?: string;
+    manufacturing_date?: string;
+    notes?: string;
+  }): Promise<any> {
+    return await apiClient.post('/api/v1/manufacturing/lots/receive', payload);
+  }
+
+  async getLotTraceability(lotId: string): Promise<ProvenanceEnvelope<LotTraceabilityReport | null>> {
+    try {
+      const report = await apiClient.get<LotTraceabilityReport>(`/api/v1/manufacturing/lots/${lotId}/traceability`);
+      return { data: report, provenance: 'LIVE', sourceNote: 'Authoritative End-to-End Lot Traceability' };
+    } catch {
+      return { data: null, provenance: 'FALLBACK', sourceNote: 'Traceability offline' };
+    }
+  }
+
+  async getWorkOrderLotHoldings(workOrderId: string): Promise<ProvenanceEnvelope<WorkOrderLotHoldingItem[]>> {
+    try {
+      const items = await apiClient.get<WorkOrderLotHoldingItem[]>(`/api/v1/manufacturing/work-orders/${workOrderId}/lots`);
+      return { data: items || [], provenance: 'LIVE', sourceNote: 'Floor Lot Holdings' };
+    } catch {
+      return { data: [], provenance: 'FALLBACK', sourceNote: 'Holdings offline' };
+    }
   }
 
 }

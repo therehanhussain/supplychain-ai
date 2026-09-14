@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from backend.app.models.work_order import WorkOrder
     from backend.app.models.production_order import ProductionOrder
     from backend.app.models.user import User
+    from backend.app.models.material_lot import MaterialLot
 
 
 class StockTransaction(Base, TimestampMixin):
@@ -32,6 +33,9 @@ class StockTransaction(Base, TimestampMixin):
     )
     warehouse_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("warehouses.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    lot_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("material_lots.id", ondelete="SET NULL"), nullable=True, index=True
     )
     work_order_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("work_orders.id", ondelete="SET NULL"), nullable=True, index=True
@@ -70,3 +74,4 @@ class StockTransaction(Base, TimestampMixin):
     production_order: Mapped[Optional["ProductionOrder"]] = relationship("ProductionOrder", back_populates="stock_transactions")
     employee: Mapped[Optional["User"]] = relationship("User", foreign_keys=[employee_id])
     performed_by_user: Mapped["User"] = relationship("User", foreign_keys=[performed_by_user_id])
+    lot: Mapped[Optional["MaterialLot"]] = relationship("MaterialLot", back_populates="stock_transactions")
