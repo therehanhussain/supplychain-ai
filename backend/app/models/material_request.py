@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     from backend.app.models.work_order import WorkOrder
     from backend.app.models.product import Product
     from backend.app.models.user import User
+    from backend.app.models.stock_transaction import StockTransaction
 
 
 class MaterialRequest(Base, TimestampMixin):
@@ -34,9 +35,18 @@ class MaterialRequest(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False, index=True)
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reviewed_by_user_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    rejection_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    issued_transaction_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("stock_transactions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # Relationships
     organization: Mapped["Organization"] = relationship("Organization")
     work_order: Mapped["WorkOrder"] = relationship("WorkOrder")
     product: Mapped["Product"] = relationship("Product")
     requester: Mapped["User"] = relationship("User", foreign_keys=[requested_by_user_id])
+    reviewer: Mapped[Optional["User"]] = relationship("User", foreign_keys=[reviewed_by_user_id])
+    issued_transaction: Mapped[Optional["StockTransaction"]] = relationship("StockTransaction", foreign_keys=[issued_transaction_id])

@@ -79,7 +79,14 @@ export interface MaterialRequestItem {
   status: string;
   reason: string;
   notes?: string;
+  reviewed_by_user_id?: string;
+  reviewed_by_name?: string;
+  rejection_reason?: string;
+  issued_transaction_id?: string;
+  warehouse_stock?: number;
+  holding_quantity?: number;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface EmployeeDashboardStats {
@@ -613,6 +620,27 @@ class ControlTowerApiService {
     } catch {
       return { data: [], provenance: 'FALLBACK', sourceNote: 'Requisitions offline' };
     }
+  }
+
+  async getMaterialRequest(id: string): Promise<ProvenanceEnvelope<MaterialRequestItem | null>> {
+    try {
+      const item = await apiClient.get<MaterialRequestItem>(`/api/v1/manufacturing/material-requests/${id}`);
+      return { data: item, provenance: 'LIVE', sourceNote: 'Material Requisition Details' };
+    } catch {
+      return { data: null, provenance: 'FALLBACK', sourceNote: 'Requisition details offline' };
+    }
+  }
+
+  async approveMaterialRequest(id: string, notes?: string): Promise<any> {
+    return await apiClient.post(`/api/v1/manufacturing/material-requests/${id}/approve`, { notes });
+  }
+
+  async rejectMaterialRequest(id: string, reason: string, notes?: string): Promise<any> {
+    return await apiClient.post(`/api/v1/manufacturing/material-requests/${id}/reject`, { reason, notes });
+  }
+
+  async issueMaterialRequest(id: string, payload?: { warehouse_id?: string; idempotency_key?: string; notes?: string }): Promise<any> {
+    return await apiClient.post(`/api/v1/manufacturing/material-requests/${id}/issue`, payload || {});
   }
 
 }

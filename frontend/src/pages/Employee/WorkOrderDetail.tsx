@@ -32,6 +32,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import controlTowerApi, {
   WorkOrderDetailItem,
   MaterialRequirementItem,
+  MaterialRequestItem,
   DataProvenance,
 } from '../../services/controlTowerApi';
 import ProvenanceBadge from '../../components/common/ProvenanceBadge';
@@ -49,6 +50,7 @@ export const WorkOrderDetail: React.FC = () => {
   const [provenance, setProvenance] = useState<DataProvenance>('LIVE');
   const [workOrder, setWorkOrder] = useState<WorkOrderDetailItem | null>(null);
   const [materials, setMaterials] = useState<MaterialRequirementItem[]>([]);
+  const [requisitions, setRequisitions] = useState<MaterialRequestItem[]>([]);
 
   // Modal States
   const [consumeModalVisible, setConsumeModalVisible] = useState<boolean>(false);
@@ -65,9 +67,10 @@ export const WorkOrderDetail: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const [woRes, matRes] = await Promise.all([
+      const [woRes, matRes, reqRes] = await Promise.all([
         controlTowerApi.getWorkOrderDetail(id),
         controlTowerApi.getWorkOrderMaterials(id),
+        controlTowerApi.listMaterialRequests(id, true),
       ]);
 
       if (!woRes.data) {
@@ -75,6 +78,7 @@ export const WorkOrderDetail: React.FC = () => {
       }
       setWorkOrder(woRes.data);
       setMaterials(matRes.data || []);
+      setRequisitions(reqRes.data || []);
       setProvenance(woRes.provenance);
     } catch (err: any) {
       setError(err?.message || 'Failed to load work order detail.');
@@ -460,6 +464,100 @@ export const WorkOrderDetail: React.FC = () => {
             columns={columns}
             rowKey="id"
             pagination={false}
+            scroll={{ x: 950 }}
+          />
+        )}
+      </Card>
+
+      {/* Material Requisitions Status Table */}
+      <Card
+        title={
+          <Space>
+            <PlusOutlined style={{ color: '#1E40AF' }} />
+            <Text strong style={{ fontSize: 16 }}>Requisitions for this Work Order</Text>
+            <Tag color="blue">{requisitions.length} Requests</Tag>
+          </Space>
+        }
+        bordered
+        style={{ borderRadius: 8, marginTop: 24 }}
+      >
+        {requisitions.length === 0 ? (
+          <EmptyState
+            title="No Extra Requisitions Submitted"
+            description="If additional material is needed from the warehouse for this job, click 'Request Extra Material'."
+          />
+        ) : (
+          <Table
+            dataSource={requisitions}
+            rowKey="id"
+            pagination={false}
+            scroll={{ x: 850 }}
+            columns={[
+              {
+                title: 'Component / Material',
+                key: 'product',
+                render: (_: any, r: MaterialRequestItem) => (
+                  <Space direction="vertical" size={0}>
+                    <Text strong>{r.product_name || r.product_sku}</Text>
+                    <Text type="secondary" style={{ fontSize: 11 }}>SKU: <Text code>{r.product_sku}</Text></Text>
+                  </Space>
+                ),
+              },
+              {
+                title: 'Requested Qty',
+                key: 'quantity',
+                render: (_: any, r: MaterialRequestItem) => (
+                  <Text strong>{r.quantity} {r.unit_of_measure}</Text>
+                ),
+              },
+              {
+                title: 'Reason / Usage Note',
+                dataIndex: 'reason',
+                key: 'reason',
+              },
+              {
+                title: 'Requested At',
+                dataIndex: 'created_at',
+                key: 'created_at',
+                render: (t: string) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' ' + new Date(t).toLocaleDateString(),
+              },
+              {
+                title: 'Reviewer / Storekeeper',
+                key: 'reviewer',
+                render: (_: any, r: MaterialRequestItem) => {
+                  if (r.reviewed_by_name) {
+                    return <Text strong style={{ fontSize: 12 }}>{r.reviewed_by_name}</Text>;
+                  }
+                  if (r.status === 'PENDING') {
+                    return <Text type="secondary" style={{ fontStyle: 'italic', fontSize: 12 }}>Awaiting Review</Text>;
+                  }
+                  return <Text type="secondary">—</Text>;
+                },
+              },
+              {
+                title: 'Requisition Status',
+                key: 'status',
+                render: (_: any, r: MaterialRequestItem) => {
+                  if (r.status === 'PENDING') {
+                    return <Tag color="gold" style={{ fontWeight: 600 }}>PENDING REVIEW</Tag>;
+                  }
+                  if (r.status === 'APPROVED') {
+                    return <Tag color="blue" style={{ fontWeight: 600 }}>APPROVED (Awaiting Warehouse Issue)</Tag>;
+                  }
+                  if (r.status === 'FULFILLED') {
+                    return <Tag color="green" style={{ fontWeight: 600 }}>FULFILLED / ISSUED TO HOLDING</Tag>;
+                  }
+                  if (r.status === 'REJECTED') {
+                    return (
+                      <Tooltip title={`Rejection Reason: ${r.rejection_reason || 'Denied by storekeeper'}`}>
+                        <Tag color="red" style={{ fontWeight: 600 }}>REJECTED</Tag>
+                      </Tooltip>
+                    );
+                  }
+                  return <Tag>{r.status}</Tag>;
+                },
+              },
+            ]}
           />
         )}
       </Card>

@@ -30,7 +30,9 @@ import {
   AppstoreOutlined,
   WarningOutlined,
   CheckCircleOutlined,
+  InboxOutlined,
 } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
 
 import { useApp } from '../../context/AppContext';
 import PageHeader from '../../components/common/PageHeader';
@@ -41,6 +43,7 @@ const { Option } = Select;
 const { Text } = Typography;
 
 export const InventoryPage: React.FC = () => {
+  const navigate = useNavigate();
   const { isDemoMode } = useApp();
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -244,9 +247,18 @@ export const InventoryPage: React.FC = () => {
         onRefresh={fetchInventory}
         refreshing={loading}
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
-            Restock / Add SKU
-          </Button>
+          <Space>
+            <Button
+              icon={<InboxOutlined />}
+              onClick={() => navigate('/inventory/requests')}
+              style={{ borderColor: '#BFDBFE', color: '#1E40AF', background: '#EFF6FF', fontWeight: 600 }}
+            >
+              Open Material Requests
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleOpenCreate}>
+              Restock / Add SKU
+            </Button>
+          </Space>
         }
       />
 

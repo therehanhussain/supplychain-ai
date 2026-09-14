@@ -46,6 +46,7 @@ import {
   ToolOutlined,
   FileTextOutlined,
   HistoryOutlined,
+  InboxOutlined,
   CheckCircleFilled,
   ExclamationCircleFilled,
   CloseCircleFilled,
@@ -120,6 +121,11 @@ export const AppShell: React.FC<AppShellProps> = ({ children }) => {
           key: '/inventory',
           icon: <AppstoreOutlined style={{ fontSize: 15 }} />,
           label: 'Inventory',
+        },
+        {
+          key: '/inventory/requests',
+          icon: <InboxOutlined style={{ fontSize: 15 }} />,
+          label: 'Material Requests',
         },
         {
           key: '/orders',

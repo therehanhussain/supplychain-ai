@@ -231,6 +231,12 @@ class MaterialRequestResponse(BaseModel):
     status: str
     reason: str
     notes: Optional[str] = None
+    reviewed_by_user_id: Optional[str] = None
+    reviewed_by_name: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    issued_transaction_id: Optional[str] = None
+    warehouse_stock: Optional[float] = None
+    holding_quantity: Optional[float] = None
     created_at: datetime
     updated_at: datetime
 
@@ -239,6 +245,21 @@ class MaterialRequestResponse(BaseModel):
 
 class MaterialRequestUpdate(BaseModel):
     status: str = Field(..., description="Target status: APPROVED, REJECTED, or FULFILLED")
+    notes: Optional[str] = None
+
+
+class MaterialRequestApprove(BaseModel):
+    notes: Optional[str] = None
+
+
+class MaterialRequestReject(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=255, description="Mandatory rationale for rejecting requisition")
+    notes: Optional[str] = None
+
+
+class MaterialRequestIssue(BaseModel):
+    warehouse_id: Optional[str] = None
+    idempotency_key: Optional[str] = None
     notes: Optional[str] = None
 
 

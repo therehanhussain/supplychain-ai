@@ -23,6 +23,9 @@ from backend.app.schemas.manufacturing import (
     MaterialRequestCreate,
     MaterialRequestResponse,
     MaterialRequestUpdate,
+    MaterialRequestApprove,
+    MaterialRequestReject,
+    MaterialRequestIssue,
     ConsumeMaterialRequest,
     ReturnMaterialRequest,
     WastageMaterialRequest,
@@ -397,6 +400,66 @@ async def list_material_requests(
         status=status,
         my_requests_only=(my_requests or not is_admin),
     )
+
+
+@router.get(
+    "/material-requests/{id}",
+    response_model=MaterialRequestResponse,
+    summary="Get single material request with inventory context",
+)
+async def get_material_request(
+    id: str,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.get_material_request(id)
+
+
+@router.post(
+    "/material-requests/{id}/approve",
+    response_model=MaterialRequestResponse,
+    summary="Approve pending material request (Admin/Storekeeper)",
+)
+async def approve_material_request(
+    id: str,
+    payload: Optional[MaterialRequestApprove] = None,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.approve_material_request(id, payload)
+
+
+@router.post(
+    "/material-requests/{id}/reject",
+    response_model=MaterialRequestResponse,
+    summary="Reject pending material request with reason (Admin/Storekeeper)",
+)
+async def reject_material_request(
+    id: str,
+    payload: MaterialRequestReject,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.reject_material_request(id, payload)
+
+
+@router.post(
+    "/material-requests/{id}/issue",
+    response_model=StockTransactionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Issue material from warehouse to work order against approved request (Admin/Storekeeper)",
+)
+async def issue_material_request(
+    id: str,
+    payload: Optional[MaterialRequestIssue] = None,
+    tenant: TenantContext = Depends(get_auth_tenant_context),
+    db: AsyncSession = Depends(get_db),
+):
+    service = MaterialTraceabilityService(db, tenant.organization_id, tenant.user_id)
+    return await service.issue_material_request(id, payload)
 
 
 @router.post(

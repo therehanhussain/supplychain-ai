@@ -41,6 +41,9 @@ from backend.app.schemas.manufacturing import (
     MaterialRequestCreate,
     MaterialRequestResponse,
     MaterialRequestUpdate,
+    MaterialRequestApprove,
+    MaterialRequestReject,
+    MaterialRequestIssue,
     WorkOrderDetailResponse,
     EmployeeDashboardStats,
 )
@@ -1084,6 +1087,76 @@ class MaterialTraceabilityService:
             updated_at=req.updated_at,
         )
 
+    async def get_material_request(self, request_id: str) -> MaterialRequestResponse:
+        """Fetch single material request with organization validation and inventory context."""
+        query = (
+            select(MaterialRequest)
+            .options(
+                selectinload(MaterialRequest.work_order),
+                selectinload(MaterialRequest.product),
+                selectinload(MaterialRequest.requester),
+                selectinload(MaterialRequest.reviewer),
+            )
+            .where(
+                MaterialRequest.id == request_id,
+                MaterialRequest.organization_id == self.organization_id,
+            )
+        )
+        res = await self.db.execute(query)
+        req = res.scalar_one_or_none()
+        if not req:
+            raise AppException(f"Material request '{request_id}' not found.", 404, "MATERIAL_REQUEST_NOT_FOUND")
+
+        wh_stock = 0.0
+        if req.work_order and req.work_order.warehouse_id:
+            inv_res = await self.db.execute(
+                select(Inventory).where(
+                    Inventory.organization_id == self.organization_id,
+                    Inventory.warehouse_id == req.work_order.warehouse_id,
+                    Inventory.product_id == req.product_id,
+                )
+            )
+            inv = inv_res.scalar_one_or_none()
+            if inv:
+                wh_stock = float(inv.quantity)
+
+        holding_qty = 0.0
+        mr_res = await self.db.execute(
+            select(MaterialRequirement).where(
+                MaterialRequirement.organization_id == self.organization_id,
+                MaterialRequirement.work_order_id == req.work_order_id,
+                MaterialRequirement.product_id == req.product_id,
+            )
+        )
+        mr = mr_res.scalar_one_or_none()
+        if mr:
+            holding_qty = mr.remaining_issued_holding
+
+        return MaterialRequestResponse(
+            id=req.id,
+            organization_id=req.organization_id,
+            work_order_id=req.work_order_id,
+            work_order_number=req.work_order.work_order_number if req.work_order else None,
+            product_id=req.product_id,
+            product_sku=req.product.sku if req.product else None,
+            product_name=req.product.name if req.product else None,
+            requested_by_user_id=req.requested_by_user_id,
+            requested_by_name=req.requester.full_name or req.requester.email if req.requester else None,
+            quantity=req.quantity,
+            unit_of_measure=req.unit_of_measure,
+            status=req.status,
+            reason=req.reason,
+            notes=req.notes,
+            reviewed_by_user_id=req.reviewed_by_user_id,
+            reviewed_by_name=req.reviewer.full_name or req.reviewer.email if req.reviewer else None,
+            rejection_reason=req.rejection_reason,
+            issued_transaction_id=req.issued_transaction_id,
+            warehouse_stock=wh_stock,
+            holding_quantity=holding_qty,
+            created_at=req.created_at,
+            updated_at=req.updated_at,
+        )
+
     async def list_material_requests(
         self, work_order_id: Optional[str] = None, status: Optional[str] = None, my_requests_only: bool = False
     ) -> List[MaterialRequestResponse]:
@@ -1094,6 +1167,7 @@ class MaterialTraceabilityService:
                 selectinload(MaterialRequest.work_order),
                 selectinload(MaterialRequest.product),
                 selectinload(MaterialRequest.requester),
+                selectinload(MaterialRequest.reviewer),
             )
             .where(MaterialRequest.organization_id == self.organization_id)
         )
@@ -1108,27 +1182,247 @@ class MaterialTraceabilityService:
         res = await self.db.execute(query)
         reqs = res.scalars().all()
 
-        return [
-            MaterialRequestResponse(
-                id=r.id,
-                organization_id=r.organization_id,
-                work_order_id=r.work_order_id,
-                work_order_number=r.work_order.work_order_number if r.work_order else None,
-                product_id=r.product_id,
-                product_sku=r.product.sku if r.product else None,
-                product_name=r.product.name if r.product else None,
-                requested_by_user_id=r.requested_by_user_id,
-                requested_by_name=r.requester.full_name or r.requester.email if r.requester else None,
-                quantity=r.quantity,
-                unit_of_measure=r.unit_of_measure,
-                status=r.status,
-                reason=r.reason,
-                notes=r.notes,
-                created_at=r.created_at,
-                updated_at=r.updated_at,
+        responses = []
+        for r in reqs:
+            wh_stock = 0.0
+            if r.work_order and r.work_order.warehouse_id:
+                inv_res = await self.db.execute(
+                    select(Inventory).where(
+                        Inventory.organization_id == self.organization_id,
+                        Inventory.warehouse_id == r.work_order.warehouse_id,
+                        Inventory.product_id == r.product_id,
+                    )
+                )
+                inv = inv_res.scalar_one_or_none()
+                if inv:
+                    wh_stock = float(inv.quantity)
+
+            holding_qty = 0.0
+            mr_res = await self.db.execute(
+                select(MaterialRequirement).where(
+                    MaterialRequirement.organization_id == self.organization_id,
+                    MaterialRequirement.work_order_id == r.work_order_id,
+                    MaterialRequirement.product_id == r.product_id,
+                )
             )
-            for r in reqs
-        ]
+            mr = mr_res.scalar_one_or_none()
+            if mr:
+                holding_qty = mr.remaining_issued_holding
+
+            responses.append(
+                MaterialRequestResponse(
+                    id=r.id,
+                    organization_id=r.organization_id,
+                    work_order_id=r.work_order_id,
+                    work_order_number=r.work_order.work_order_number if r.work_order else None,
+                    product_id=r.product_id,
+                    product_sku=r.product.sku if r.product else None,
+                    product_name=r.product.name if r.product else None,
+                    requested_by_user_id=r.requested_by_user_id,
+                    requested_by_name=r.requester.full_name or r.requester.email if r.requester else None,
+                    quantity=r.quantity,
+                    unit_of_measure=r.unit_of_measure,
+                    status=r.status,
+                    reason=r.reason,
+                    notes=r.notes,
+                    reviewed_by_user_id=r.reviewed_by_user_id,
+                    reviewed_by_name=r.reviewer.full_name or r.reviewer.email if r.reviewer else None,
+                    rejection_reason=r.rejection_reason,
+                    issued_transaction_id=r.issued_transaction_id,
+                    warehouse_stock=wh_stock,
+                    holding_quantity=holding_qty,
+                    created_at=r.created_at,
+                    updated_at=r.updated_at,
+                )
+            )
+        return responses
+
+    async def approve_material_request(
+        self, request_id: str, payload: Optional[MaterialRequestApprove] = None
+    ) -> MaterialRequestResponse:
+        """Approve a pending material request. ZERO inventory deduction."""
+        caller = await self.db.get(User, self.user_id)
+        if not caller or caller.role not in (UserRole.ADMIN, "ADMIN"):
+            raise AppException("Access forbidden. Approving material requests requires administrator authority.", 403, "FORBIDDEN_UNAUTHORIZED_APPROVER")
+
+        query = (
+            select(MaterialRequest)
+            .options(
+                selectinload(MaterialRequest.work_order),
+                selectinload(MaterialRequest.product),
+                selectinload(MaterialRequest.requester),
+                selectinload(MaterialRequest.reviewer),
+            )
+            .where(
+                MaterialRequest.id == request_id,
+                MaterialRequest.organization_id == self.organization_id,
+            )
+        )
+        res = await self.db.execute(query)
+        req = res.scalar_one_or_none()
+        if not req:
+            raise AppException(f"Material request '{request_id}' not found.", 404, "MATERIAL_REQUEST_NOT_FOUND")
+
+        if req.status == "APPROVED":
+            raise AppException("Material request is already approved.", 400, "REQUEST_ALREADY_APPROVED")
+        if req.status == "REJECTED":
+            raise AppException("Cannot approve a rejected material request.", 400, "REQUEST_ALREADY_REJECTED")
+        if req.status == "FULFILLED":
+            raise AppException("Material request has already been fulfilled.", 400, "REQUEST_ALREADY_FULFILLED")
+        if req.status != "PENDING":
+            raise AppException(f"Cannot approve request with status '{req.status}'.", 400, "INVALID_REQUEST_STATUS")
+
+        req.status = "APPROVED"
+        req.reviewed_by_user_id = self.user_id
+        if payload and payload.notes:
+            req.notes = f"{req.notes or ''} | Approval: {payload.notes}".strip(" |")
+
+        audit = AuditLog(
+            organization_id=self.organization_id,
+            user_id=self.user_id,
+            action="REQUEST_APPROVED",
+            entity_type="MaterialRequest",
+            entity_id=req.id,
+            details=f"Approved by {caller.full_name or caller.email}. WO={req.work_order.work_order_number if req.work_order else req.work_order_id}, Qty={req.quantity}",
+        )
+        self.db.add(audit)
+
+        await self.db.commit()
+        await self.db.refresh(req)
+
+        return await self.get_material_request(req.id)
+
+    async def reject_material_request(
+        self, request_id: str, payload: MaterialRequestReject
+    ) -> MaterialRequestResponse:
+        """Reject a pending material request with mandatory reason. ZERO inventory change."""
+        caller = await self.db.get(User, self.user_id)
+        if not caller or caller.role not in (UserRole.ADMIN, "ADMIN"):
+            raise AppException("Access forbidden. Rejecting material requests requires administrator authority.", 403, "FORBIDDEN_UNAUTHORIZED_APPROVER")
+
+        if not payload.reason or not payload.reason.strip():
+            raise AppException("Mandatory rejection reason required.", 400, "REJECTION_REASON_REQUIRED")
+
+        query = (
+            select(MaterialRequest)
+            .options(
+                selectinload(MaterialRequest.work_order),
+                selectinload(MaterialRequest.product),
+                selectinload(MaterialRequest.requester),
+                selectinload(MaterialRequest.reviewer),
+            )
+            .where(
+                MaterialRequest.id == request_id,
+                MaterialRequest.organization_id == self.organization_id,
+            )
+        )
+        res = await self.db.execute(query)
+        req = res.scalar_one_or_none()
+        if not req:
+            raise AppException(f"Material request '{request_id}' not found.", 404, "MATERIAL_REQUEST_NOT_FOUND")
+
+        if req.status != "PENDING":
+            raise AppException(f"Cannot reject material request with status '{req.status}'.", 400, "REQUEST_NOT_PENDING")
+
+        req.status = "REJECTED"
+        req.rejection_reason = payload.reason.strip()
+        req.reviewed_by_user_id = self.user_id
+        if payload.notes:
+            req.notes = f"{req.notes or ''} | Rejection: {payload.notes}".strip(" |")
+
+        audit = AuditLog(
+            organization_id=self.organization_id,
+            user_id=self.user_id,
+            action="REQUEST_REJECTED",
+            entity_type="MaterialRequest",
+            entity_id=req.id,
+            details=f"Rejected by {caller.full_name or caller.email}. Reason={payload.reason}",
+        )
+        self.db.add(audit)
+
+        await self.db.commit()
+        await self.db.refresh(req)
+
+        return await self.get_material_request(req.id)
+
+    async def issue_material_request(
+        self, request_id: str, payload: Optional[MaterialRequestIssue] = None
+    ) -> StockTransactionResponse:
+        """Execute physical warehouse material issue against an approved requisition."""
+        caller = await self.db.get(User, self.user_id)
+        if not caller or caller.role not in (UserRole.ADMIN, "ADMIN"):
+            raise AppException("Access forbidden. Material issuance requires administrator authority.", 403, "FORBIDDEN_UNAUTHORIZED_ISSUER")
+
+        query = (
+            select(MaterialRequest)
+            .options(
+                selectinload(MaterialRequest.work_order),
+                selectinload(MaterialRequest.product),
+                selectinload(MaterialRequest.requester),
+            )
+            .where(
+                MaterialRequest.id == request_id,
+                MaterialRequest.organization_id == self.organization_id,
+            )
+        )
+        res = await self.db.execute(query)
+        req = res.scalar_one_or_none()
+        if not req:
+            raise AppException(f"Material request '{request_id}' not found.", 404, "MATERIAL_REQUEST_NOT_FOUND")
+
+        if req.status == "PENDING":
+            raise AppException("Material request must be approved before issuance.", 400, "REQUEST_NOT_APPROVED")
+        if req.status == "REJECTED":
+            raise AppException("Cannot issue a rejected material request.", 400, "REQUEST_ALREADY_REJECTED")
+        if req.status == "FULFILLED" or req.issued_transaction_id:
+            raise AppException("Material request has already been fulfilled.", 400, "REQUEST_ALREADY_FULFILLED")
+        if req.status != "APPROVED":
+            raise AppException(f"Cannot issue material request with status '{req.status}'. Must be APPROVED.", 400, "INVALID_REQUEST_STATUS")
+
+        # Resolve warehouse
+        warehouse_id = (payload and payload.warehouse_id) or (req.work_order and req.work_order.warehouse_id)
+        if not warehouse_id:
+            wh_res = await self.db.execute(
+                select(Warehouse).where(Warehouse.organization_id == self.organization_id).limit(1)
+            )
+            wh = wh_res.scalar_one_or_none()
+            if not wh:
+                raise AppException("No warehouse found to issue materials from.", 404, "WAREHOUSE_NOT_FOUND")
+            warehouse_id = wh.id
+
+        # Re-use atomic record_transaction service
+        tx_create = StockTransactionCreate(
+            work_order_id=req.work_order_id,
+            product_id=req.product_id,
+            warehouse_id=warehouse_id,
+            transaction_type=TransactionType.ISSUE,
+            quantity=req.quantity,
+            unit_of_measure=req.unit_of_measure or (req.product.unit_of_measure if req.product else "kg"),
+            reason=f"Requisition fulfillment: {req.reason}",
+            reference_type="MATERIAL_REQUEST",
+            reference_id=req.id,
+            notes=(payload and payload.notes) or req.notes,
+        )
+        tx_response = await self.record_transaction(tx_create)
+
+        # Update MaterialRequest to FULFILLED
+        req.status = "FULFILLED"
+        req.issued_transaction_id = tx_response.id
+
+        audit = AuditLog(
+            organization_id=self.organization_id,
+            user_id=self.user_id,
+            action="MATERIAL_ISSUED",
+            entity_type="MaterialRequest",
+            entity_id=req.id,
+            details=f"Issued by {caller.full_name or caller.email}. TX={tx_response.id}, Qty={req.quantity}",
+        )
+        self.db.add(audit)
+
+        await self.db.commit()
+        await self.db.refresh(req)
+
+        return tx_response
 
     async def get_employee_activity(self, skip: int = 0, limit: int = 50) -> List[StockTransactionResponse]:
         """Fetch transactions executed by the authenticated operator."""

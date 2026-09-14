@@ -19,6 +19,7 @@ import RiskPage from './pages/Risk';
 import ForecastPage from './pages/Forecast';
 import SimulationsPage from './pages/Simulations';
 import AnalyticsPage from './pages/Analytics';
+import MaterialRequestsQueue from './pages/Inventory/MaterialRequestsQueue';
 
 // Employee Operations Portal (Phase 13.2)
 import EmployeeDashboard from './pages/Employee/EmployeeDashboard';
@@ -63,6 +64,10 @@ const router = createBrowserRouter([
   {
     path: "/inventory",
     element: <AppShell><InventoryPage /></AppShell>,
+  },
+  {
+    path: "/inventory/requests",
+    element: <AppShell><MaterialRequestsQueue /></AppShell>,
   },
   {
     path: "/orders",
